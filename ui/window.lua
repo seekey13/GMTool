@@ -22,6 +22,7 @@ local data = require('core.data')
 local kit = require('ui.kit')
 local macros = require('core.macros')
 local replies = require('core.replies')
+local drops = require('core.drops')
 local spawns = require('core.spawns')
 local store = require('core.store')
 local util = require('core.util')
@@ -1240,6 +1241,46 @@ local function action_grid(pg, list, prefix, sent)
     end
 end
 
+-- Mob `e`'s drops (core/drops.lua), a row each from `x`: the item as the client names it, how it comes, and Add
+-- (!additem: to your own inventory). `prefix` keeps the ids apart. `heading`: under a page's own heading (none
+-- of its own).
+local function drop_rows(pg, e, prefix, x, heading)
+    local list = drops.of(e.drop)
+    local d = pg.dl
+    if heading then
+        subheader(pg, heading)
+        if #list == 0 then note(pg, 'None in its drop list.', P.dim) end
+    end
+    local function row()
+        local y = pg.y
+        local cy = line(pg, nil, nil, S(26))
+        return y < pg.bottom and y + S(26) > pg.top, cy
+    end
+    if not heading then
+        local shown, hcy = row()
+        if shown then
+            kit.text_mid(d, x, hcy, #list > 0 and 'DROPS' or 'NO DROPS IN ITS LIST', P.faint, kit.fonts.semi, S(SMALL - 1.5))
+        end
+    end
+    for j, dr in ipairs(list) do
+        local vis, cy = row()
+        if vis then
+            local name = data.name_of('items', dr.item) or ('item ' .. dr.item)
+            local aw = kit.button_width('Add')
+            local add_x = pg.right - aw
+            local chance = drops.chance(dr)
+            local cw = kit.measure(chance, kit.fonts.text, S(SMALL))
+            kit.text_right(d, add_x - S(10), cy, chance, dr.kind == 'drop' and P.text2 or P.dim, kit.fonts.text, S(SMALL))
+            kit.text_mid(d, x, cy, kit.fit(('%s (%d)'):format(name, dr.item), add_x - S(20) - cw - x, kit.fonts.text, S(SMALL + 0.5)),
+                P.text, kit.fonts.text, S(SMALL + 0.5))
+            if kit.button(('##gm_drop_%s_%d'):format(prefix, j), add_x, cy, 'Add', 'ghost') then
+                act.send('!additem ' .. dr.item, { cursor = false })
+            end
+            kit.tip(('Put one in your inventory: !additem %d'):format(dr.item))
+        end
+    end
+end
+
 -- Status effects ----------------------------------------------------------------------------------------------
 -- The newest answer to `!geteffects <arg>` (a player's name, or a mob's server id) this session, as rows. For a
 -- player (`who`) each has Remove: !deleffect, then the list again, so it stays current.
@@ -1349,6 +1390,7 @@ local function target_page(pg)
     action_grid(pg, actions.for_target(t, view.me and view.me.name), ('tact_%s_%d'):format(t.kind, t.index or 0))
     if t.kind == 'pc' then effects_panel(pg, t.name, t.name)
     elseif t.kind == 'mob' and t.sid then effects_panel(pg, tostring(t.sid), nil) end
+    if known and known.kind == 'mob' then drop_rows(pg, known, 'tgt', pg.lx, 'Drops') end
 end
 
 -- Players -----------------------------------------------------------------------------------------------------
@@ -1670,33 +1712,28 @@ local function zones_page(pg)
         local y = pg.y
         local lcy = line(pg, nil)
         local single = #e.ids == 1
-        local open = not single and zb.open[e.key]
+        local open = zb.open[e.key]
         if visible(y) then
             local nup = 0
             for _, id in ipairs(e.ids) do if up[id] then nup = nup + 1 end end
             kit.circle(d, pg.lx + S(3), lcy, S(3.5), e.kind == 'npc' and P.amber or P.rose)
             if nup > 0 then kit.ring(d, pg.lx + S(3), lcy, S(6), P.teal) end
-            local right = single and (pg.right - zb_buttons_width(e, here)) or (pg.right - S(20))
+            local right = single and (pg.right - zb_buttons_width(e, here)) or pg.right
             local nx = pg.lx + S(14)
             local room = right - nx - S(8)
             local name_px = S(BODY - 1)
             local name = kit.fit(e.name, room * 0.62, kit.fonts.text, name_px)
-            kit.text_mid(d, nx, lcy, name, P.white, kit.fonts.text, name_px)
             local nw = kit.measure(name, kit.fonts.text, name_px) + S(10)
+            local hovered, clicked = kit.hit('##gm_zb_row_' .. e.key, pg.x + S(4), y + S(3), nx - pg.x + room, S(ROW_H) - S(6))
+            kit.icon(d, open and 'down' or 'right', pg.x + S(GUTTER), lcy, S(10), hovered and P.teal or P.faint)
+            kit.text_mid(d, nx, lcy, name, hovered and kit.mix(P.white, P.accent2, 0.35) or P.white, kit.fonts.text, name_px)
             zb_info(d, nx + nw, lcy, room - nw, e, nup)
-            local hovered, clicked = kit.hit('##gm_zb_row_' .. e.key, nx - S(2), y + S(3), room + S(6), S(ROW_H) - S(6))
             if hovered then
-                kit.tooltip(table.concat(spawns.describe(e, jobs()), '\n') .. (single and '\nClick to copy the id.'
-                    or '\nClick to list each id.'))
+                kit.tooltip(table.concat(spawns.describe(e, jobs()), '\n') .. (e.kind == 'mob' and '\nClick for its ids and drops.'
+                    or '\nClick for its ids.'))
             end
-            if clicked then
-                if single then copy_id(e.ids[1], e.name) else zb.open[e.key] = not open or nil end
-            end
-            if single then
-                zb_buttons(e, e.ids[1], here, pg.right, lcy)
-            else
-                kit.icon(d, open and 'down' or 'right', pg.right - S(8), lcy, S(11), hovered and P.text or P.dim)
-            end
+            if clicked then zb.open[e.key] = not open or nil end
+            if single then zb_buttons(e, e.ids[1], here, pg.right, lcy) end
         end
         if open then
             for _, id in ipairs(e.ids) do
@@ -1705,15 +1742,16 @@ local function zones_page(pg)
                 if visible(sy) then
                     local ix = pg.lx + S(28)
                     if up[id] then kit.circle(d, ix - S(8), scy, S(3), P.teal) end
-                    local s = ('%d  \194\183  index %d%s'):format(id, id - spawns.id(e.zone, 0), up[id] and '  \194\183  up near you' or '')
-                    local tw = kit.measure(s, kit.fonts.text, S(SMALL))
-                    local hovered, clicked = kit.hit(('##gm_zb_id_%s_%d'):format(e.key, id), ix - S(2), sy + S(4), tw + S(4), S(ROW_H) - S(8))
-                    kit.text_mid(d, ix, scy, s, hovered and P.accent2 or (up[id] and P.teal or P.text2), kit.fonts.text, S(SMALL))
+                    local s_ = ('%d  \194\183  index %d%s'):format(id, id - spawns.id(e.zone, 0), up[id] and '  \194\183  up near you' or '')
+                    local tw = kit.measure(s_, kit.fonts.text, S(SMALL))
+                    local hov, click = kit.hit(('##gm_zb_id_%s_%d'):format(e.key, id), ix - S(2), sy + S(4), tw + S(4), S(ROW_H) - S(8))
+                    kit.text_mid(d, ix, scy, s_, hov and P.accent2 or (up[id] and P.teal or P.text2), kit.fonts.text, S(SMALL))
                     kit.tip('Click to copy the id')
-                    if clicked then copy_id(id, e.name) end
-                    zb_buttons(e, id, here, pg.right, scy)
+                    if click then copy_id(id, e.name) end
+                    if not single then zb_buttons(e, id, here, pg.right, scy) end
                 end
             end
+            if e.kind == 'mob' then drop_rows(pg, e, 'zb_' .. e.key, pg.lx + S(28)) end
         end
     end
 end

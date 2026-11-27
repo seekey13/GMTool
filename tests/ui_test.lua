@@ -721,3 +721,35 @@ test('players: a button armed for one player never sends for the next', function
     eq(#calls.lines, 0, 'reset asks twice')
     window.state.pl = nil
 end)
+
+test('zone browser: a row opens to its ids and drops; Add puts one in your inventory', function ()
+    local spawns = require('core.spawns')
+    local drops = require('core.drops')
+    local real_s, real_d = spawns.source, drops.source
+    spawns.source = function ()
+        return { zones = { [230] = 'm|Leaping Lizzy|10|11|2|0|32|1|1|7|20' }, families = {} }
+    end
+    drops.source = function () return { [7] = '0,0,1000,10,240;2,0,1000,11,0' } end
+    spawns.reset()
+    drops.reset()
+    fresh()
+    window.state.page, window.state.zb = 'zones', nil
+    frame()
+    assert(not fake.drew('Item10'), 'folded')
+    frame({ ['##gm_zb_row_230:1'] = true })
+    frame()
+    assert(fake.drew('Item10 (10)') and fake.drew('24%') and fake.drew('steal'), 'its drops, by the client\'s names')
+    assert(fake.drew('index 20'), 'its id')
+    frame({ ['##gm_drop_zb_230:1_1'] = true })
+    eq(calls.send[1].line, '!additem 10')
+    -- the Target page, on it
+    window.state.page = 'target'
+    frame(nil, { target = { name = 'Leaping Lizzy', kind = 'mob', sid = spawns.id(230, 20), index = 20 } })
+    assert(fake.drew('Item11 (11)'), 'its drops there too')
+    frame({ ['##gm_drop_tgt_2'] = true }, { target = { name = 'Leaping Lizzy', kind = 'mob', sid = spawns.id(230, 20), index = 20 } })
+    eq(calls.send[1].line, '!additem 11')
+    spawns.source, drops.source = real_s, real_d
+    spawns.reset()
+    drops.reset()
+    window.state.zb = nil
+end)

@@ -259,7 +259,7 @@ do
     sql_rows(dir .. 'mob_groups.sql', function (r)
         local z = r[3]
         groups[z] = groups[z] or {}
-        groups[z][r[1]] = { pool = r[2], respawn = r[5] or 0, spawntype = r[6] or 0, lo = r[10] or 0, hi = r[11] or 0 }
+        groups[z][r[1]] = { pool = r[2], respawn = r[5] or 0, spawntype = r[6] or 0, drop = r[7] or 0, lo = r[10] or 0, hi = r[11] or 0 }
     end)
     local zones, seen = {}, {}  -- [zone] = { [key] = { line fields..., idx = {} } }
     local count = { mobs = 0, npcs = 0 }
@@ -284,7 +284,8 @@ do
         local p = pools[g.pool] or {}
         count.mobs = count.mobs + 1
         add(z, 'm|' .. (r[5] or 0) .. '|' .. name, function ()
-            return { 'm', name, g.lo or 0, g.hi or 0, p.type or 0, g.respawn or 0, g.spawntype or 0, p.family or 0, p.job or 0 }
+            return { 'm', name, g.lo or 0, g.hi or 0, p.type or 0, g.respawn or 0, g.spawntype or 0, p.family or 0, p.job or 0,
+                     g.drop or 0 }
         end, index)
     end)
     sql_rows(dir .. 'npc_list.sql', function (r)
@@ -338,7 +339,39 @@ do
     lines[#lines + 1] = '},'
     lines[#lines + 1] = '}\n'
     write('spawns', ('Every mob (%d) and NPC (%d) of %d zones, from the server\'s sql: per zone, a line per mob group or NPC '
-        .. 'name.\n-- A mob: m|name|min level|max level|mob type|respawn s|spawn type|family|main job|indexes. An NPC: '
-        .. 'n|name|status|indexes.\n-- An index is the id less 0x1000000 + zone * 4096; indexes are ranges, 1-3,7.')
+        .. 'name.\n-- A mob: m|name|min level|max level|mob type|respawn s|spawn type|family|main job|drop list|indexes. An '
+        .. 'NPC: n|name|status|indexes.\n-- An index is the id less 0x1000000 + zone * 4096; indexes are ranges, 1-3,7. A drop '
+        .. 'list is data/drops.lua\'s.')
         :format(count.mobs, count.npcs, #zone_ids), table.concat(lines, '\n'))
+end
+
+-- Drop lists -----------------------------------------------------------------------------------------------------
+
+do
+    local src = must(root .. '/sql/mob_droplist.sql')
+    local vars = {}  -- SET @COMMON = 150;
+    for k, v in src:gmatch('SET%s+@(%w+)%s*=%s*(%d+)%s*;') do vars[k:lower()] = tonumber(v) end  -- (any case, as MySQL)
+    local lists, rows = {}, 0
+    sql.rows(src, function (r)
+        local function num(v)
+            if type(v) == 'number' then return v end
+            local name = type(v) == 'string' and v:match('^@(%w+)$')
+            if name and vars[name:lower()] then return vars[name:lower()] end
+            error(('mob_droplist: no value for %s'):format(tostring(v)), 0)
+        end
+        local id = num(r[1])
+        lists[id] = lists[id] or {}
+        local l = lists[id]
+        l[#l + 1] = ('%d,%d,%d,%d,%d'):format(num(r[2]), num(r[3]), num(r[4]), num(r[5]), num(r[6]))
+        rows = rows + 1
+    end)
+    local ids = {}
+    for id in pairs(lists) do ids[#ids + 1] = id end
+    table.sort(ids)
+    local out = { 'return {' }
+    for _, id in ipairs(ids) do out[#out + 1] = ('[%d]=%s,'):format(id, lit(table.concat(lists[id], ';'))) end
+    out[#out + 1] = '}\n'
+    write('drops', ('%d drop lists (%d drops) from sql/mob_droplist.sql: [drop id] = \'type,group,group rate,item,rate;...\'\n'
+        .. '-- type 0 a drop, 1 one of a group (group rate for the group, rate within it), 2 steal, 4 despoil; rates per 1000.')
+        :format(#ids, rows), table.concat(out, '\n'))
 end

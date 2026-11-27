@@ -5,7 +5,7 @@
     An entry is a mob group (the mobs of one name and group) or an NPC name:
       { key, kind = 'mob' | 'npc', name, low (lowered, for the filter), zone, ids = { server id, ... } }
     and for a mob: lo, hi (its levels), type (mob type flags), respawn (seconds), spawn (spawn type flags), family,
-    job, nm; for an NPC: status (0 shown, 2 hidden, 6 cutscene only).
+    job, nm, drop (its drop list: core/drops.lua); for an NPC: status (0 shown, 2 hidden, 6 cutscene only).
 
     A server id is 0x1000000 + zone * 4096 + its index in the zone. In another zone than yours the server finds a mob
     only while that zone runs on your map process: one-process dev servers find them all.
@@ -73,7 +73,8 @@ function spawns.zone(zone)
             local t = tonumber(f[5]) or 0
             e = { kind = 'mob', name = f[2], lo = tonumber(f[3]) or 0, hi = tonumber(f[4]) or 0, type = t,
                   respawn = tonumber(f[6]) or 0, spawn = tonumber(f[7]) or 0, family = tonumber(f[8]) or 0,
-                  job = tonumber(f[9]) or 0, nm = bit.band(t, NM) ~= 0, ids = expand(zone, f[10]) }
+                  job = tonumber(f[9]) or 0, nm = bit.band(t, NM) ~= 0, drop = #f >= 11 and tonumber(f[10]) or 0,
+                  ids = expand(zone, f[#f]) }
         elseif f[1] == 'n' and #f >= 4 then
             e = { kind = 'npc', name = f[2], status = tonumber(f[3]) or 0, ids = expand(zone, f[4]) }
         end
