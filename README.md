@@ -24,7 +24,7 @@ GM Tool puts a form and a button on each of the server's 199 GM commands. It rea
 - **Queue:** the title bar counts lines still waiting. Hover it to see them, and **Clear** (or `/gmt clear`) drops them.
 - **Presets:** one-click values (Full HP, Kill, 3000 TP, Bind, Fast...).
 - **Favorites:** star any command to keep it on the Favorites page, or start from a suggested set.
-- **GM Bar:** your favorites as a strip of buttons that stays up with the main window closed (`/gmt bar`, or Settings). A click sends a favorite with its form as it is; hover a button to see the line.
+- **GM Bar:** your favorites as a strip of buttons that stays up with the main window closed (`/gmt bar`, or Settings). A click sends a favorite with its form as it is; hover a button to see the line. Star a macro or a place to put it there too: a click runs the macro (twice for a risky one, or one that goes to each of a party) or puts you at the place.
 - **Enter to send:** press Enter in any box of a form to send it (a risky command still wants its button, twice).
 - **Console:** type any line with autocomplete from the server's command list and each match's usage.
 - **History:** the last 100 lines sent, with Send again and Edit. Under each line sent this session is what the server said back (`!getid`'s id, `!geteffects`' list...), caught from the chat in the moment after it went (addons' lines and anything shaped like a player's chat are left out; lines sent together share their answers). **Copy** puts an answer on the clipboard, and a `!pos` answer (yours or another player's) can be **saved as a place**. The newest answer also shows in the window's status line.

@@ -859,3 +859,33 @@ test('setup: pick jobs, Apply sends the lines in order, Keep as macro keeps them
     frame({ ['##gm_setup_apply'] = true })
     eq(#calls.lines, 0, 'a bad level: Apply is off')
 end)
+
+test('the GM Bar: starred macros and places too; a risky macro asks twice there', function ()
+    fresh()
+    store.cfg.macros = { { name = 'Restore', lines = { '!hp 99999 {who}' }, uid = 501 },
+                         { name = 'Lock up', lines = { '!jail Zeid' }, uid = 502 } }
+    store.cfg.places = { { name = 'Home', x = 1, y = 2, z = 3, zone = 230, uid = 503 } }
+    window.state.page = 'macros'
+    frame({ ['##gm_mac_bar_501'] = true })
+    frame({ ['##gm_mac_bar_502'] = true })
+    eq({ store.cfg.macros[1].bar, store.cfg.macros[2].bar }, { true, true })
+    window.state.page = 'places'
+    frame({ ['##gm_place_bar_503'] = true })
+    eq(store.cfg.places[1].bar, true)
+    store.cfg.ui.bar = true
+    frame()
+    assert(fake.drew('Restore') and fake.drew('Lock up') and fake.drew('Home'), 'on the bar')
+    frame({ ['##gmbar_mac_501'] = true })
+    eq(calls.lines[1].lines, { '!hp 99999 Kupipi' }, 'Restore on the target')
+    frame({ ['##gmbar_mac_502'] = true })
+    eq(#calls.lines, 0, 'a risky macro asks twice')
+    frame({ ['##gmbar_mac_502'] = true })
+    eq(calls.lines[1].lines, { '!jail Zeid' })
+    frame({ ['##gmbar_place_503'] = true })
+    eq(calls.send[1].line, '!pos 1 2 3', 'your own zone: no zone in the line')
+    -- unstarred: off the bar
+    window.state.page = 'macros'
+    frame({ ['##gm_mac_bar_501'] = true })
+    eq(store.cfg.macros[1].bar, nil)
+    store.cfg.ui.bar = false
+end)

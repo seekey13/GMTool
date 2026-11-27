@@ -964,6 +964,20 @@ local function forget(prefix)
 end
 
 -- A small round mark that deletes, after a second click within ARMED seconds (rose while armed). Returns clicked.
+-- A star for macro or place `t`: lit, it's on the GM Bar (t.bar). Returns whether it was clicked.
+local function bar_star(id, t, cx, cy)
+    local d = dl()
+    local clicked = icon_button(id, cx, cy, S(20), function (col)
+        star(d, cx, cy, S(7), t.bar and P.amber or col, t.bar == true)
+    end, P.faint, P.amber)
+    kit.tip(t.bar and 'On the GM Bar: click to take it off' or 'Put it on the GM Bar (/gmt bar)')
+    if clicked then
+        t.bar = not t.bar or nil
+        store.dirty()
+    end
+    return clicked
+end
+
 local function delete_mark(id, cx, cy)
     local armed = state.armed[id] and view.now - state.armed[id] < ARMED
     local d = dl()
@@ -1124,6 +1138,7 @@ local function macros_page(pg)
             end
         end
         if delete_mark('##gm_mac_del_' .. uid_of(m), rx - S(16), hcy) then remove = i end
+        bar_star('##gm_mac_bar_' .. uid_of(m), m, rx - S(38), hcy)
         local title = util.trim(m.name) ~= '' and m.name or '(no name)'
         local tw = kit.measure(title, kit.fonts.semi, S(BODY))
         local fh, fclick = kit.hit('##gm_mac_fold_' .. i, pg.x + S(4), y + S(2), S(LEFT) + tw + S(2), h - S(4))
@@ -1135,7 +1150,7 @@ local function macros_page(pg)
         local first = m.lines[1] and util.trim(m.lines[1]) or ''
         local sub = ('%d line%s%s'):format(n, n == 1 and '' or 's', first ~= '' and (' \194\183 ' .. first) or '')
         local sx = pg.lx + tw + S(10)
-        kit.text_mid(d, sx, hcy, kit.fit(sub, rx - S(30) - sx, kit.fonts.text, S(SMALL)), P.dim, kit.fonts.text, S(SMALL))
+        kit.text_mid(d, sx, hcy, kit.fit(sub, rx - S(54) - sx, kit.fonts.text, S(SMALL)), P.dim, kit.fonts.text, S(SMALL))
         if macro_open[m] then macro_editor(pg, m, i) end
     end
     if remove then
@@ -1226,11 +1241,12 @@ local function places_page(pg)
                 kit.tip(who and ('Put %s here'):format(who) or 'Acting on names no player now')
             end
             if delete_mark('##gm_place_del_' .. uid_of(p), tx - S(16), lcy) then remove = i end
+            bar_star('##gm_place_bar_' .. uid_of(p), p, tx - S(38), lcy)
             kit.text_mid(d, pg.lx, lcy, kit.fit(p.name, S(150), kit.fonts.semi, S(BODY - 1)), P.white, kit.fonts.semi, S(BODY - 1))
             local info = ('%s  %s %s %s'):format(data.zone_name(p.zone) or ('zone ' .. p.zone), macros.coord(p.x),
                 macros.coord(p.y), macros.coord(p.z))
             local ix = pg.lx + S(160)
-            kit.text_mid(d, ix, lcy, kit.fit(info, tx - S(30) - ix, kit.fonts.text, S(SMALL)), P.dim, kit.fonts.text, S(SMALL))
+            kit.text_mid(d, ix, lcy, kit.fit(info, tx - S(54) - ix, kit.fonts.text, S(SMALL)), P.dim, kit.fonts.text, S(SMALL))
         end
     end
     if remove then
@@ -2236,12 +2252,18 @@ local function bar_body()
     local list = commands_of('favorites')
     local items = { { label = 'GM', lead = true } }
     for _, c in ipairs(list) do items[#items + 1] = { label = c.title, c = c } end
+    for _, m in ipairs(view.cfg.macros or {}) do
+        if m.bar then items[#items + 1] = { label = kit.fit(util.trim(m.name) ~= '' and m.name or 'Macro', S(140), kit.fonts.text, S(BODY - 1)), macro = m } end
+    end
+    for _, p in ipairs(view.cfg.places or {}) do
+        if p.bar then items[#items + 1] = { label = kit.fit(util.trim(p.name) ~= '' and p.name or 'Place', S(140), kit.fonts.text, S(BODY - 1)), place = p } end
+    end
     local total = pad
     for _, it in ipairs(items) do
         it.w = kit.button_width(it.label)
         total = total + it.w + gap
     end
-    local hint = #list == 0 and 'Star commands to put them here' or nil
+    local hint = #items == 1 and 'Star commands, macros or places to put them here' or nil
     if hint then total = total + kit.measure(hint, kit.fonts.text, S(SMALL)) + gap end
     total = total - gap + pad
     local d = dl()
@@ -2257,6 +2279,28 @@ local function bar_body()
             end
             kit.tip(open and 'Close GM Tool' or 'Open GM Tool')
             x = x + it.w + gap
+        elseif it.macro then
+            local m = it.macro
+            local lines, why, fans = macros.lines(m, ctx())
+            fans = lines and fans
+            local id = '##gmbar_mac_' .. uid_of(m)
+            local clicked, w
+            if why == true then clicked, w = guarded(id, x, cy, it.label, 'danger')
+            elseif fans then clicked, w = guarded(id, x, cy, it.label, 'ghost')
+            else clicked, w = kit.button(id, x, cy, it.label, 'ghost') end
+            kit.tip(lines and ('Macro: ' .. sends_tip(lines)) or ('Macro: can\'t run now (' .. tostring(why) .. ')'))
+            if clicked then
+                if lines then act.send_lines(lines, m.name)
+                else act.toast(('%s: %s'):format(m.name, why), 'error') end
+            end
+            x = x + math.max(w or it.w, it.w) + gap
+        elseif it.place then
+            local p = it.place
+            local line_ = macros.place_line(p, nil, view.me and view.me.zone)
+            local clicked, w = kit.button('##gmbar_place_' .. uid_of(p), x, cy, it.label, 'ghost')
+            kit.tip(('Place: put yourself at %s\n%s'):format(p.name, line_))
+            if clicked then act.send(line_, { cursor = false }) end
+            x = x + math.max(w or it.w, it.w) + gap
         else
             local c = it.c
             local values = store.form(c.key)
