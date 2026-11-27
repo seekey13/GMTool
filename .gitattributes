@@ -1,0 +1,9 @@
+# Release builds hold only what GM Tool runs on, its README and LICENSE:
+#   git archive --format=zip --prefix=GMTool/ -o GMTool.zip HEAD
+/.gitattributes export-ignore
+/.gitignore export-ignore
+/.luacheckrc export-ignore
+/docs export-ignore
+/tests export-ignore
+/tools export-ignore
+CLAUDE.md export-ignore

@@ -1,0 +1,33 @@
+-- In-game Lua is LuaJIT (5.1 + bit, ffi) and so is the test runner.
+std = 'luajit'
+max_line_length = false
+
+-- Ashita v4 injects these into the game client; require('imgui') adds the ImGui* constants (tests/ui_test.lua fakes
+-- the ones listed here). IMGUI_VERSION_NUM and the ImDraw* corner flags (one name per ImGui version) the fake leaves nil.
+read_globals = { 'AshitaCore', 'ashita', 'struct', 'T',
+    'ImGuiWindowFlags_AlwaysAutoResize', 'ImGuiWindowFlags_NoResize', 'ImGuiWindowFlags_NoTitleBar',
+    'ImGuiWindowFlags_NoScrollbar', 'ImGuiWindowFlags_NoScrollWithMouse', 'ImGuiWindowFlags_NoBackground',
+    'ImGuiWindowFlags_NoBringToFrontOnFocus', 'ImGuiWindowFlags_NoMove', 'ImGuiWindowFlags_NoCollapse',
+    'ImGuiWindowFlags_NoNavInputs', 'ImGuiWindowFlags_NoSavedSettings', 'ImGuiWindowFlags_NoFocusOnAppearing',
+    'ImGuiCond_FirstUseEver', 'ImGuiCond_Always',
+    'ImGuiStyleVar_WindowPadding', 'ImGuiStyleVar_WindowBorderSize', 'ImGuiStyleVar_WindowRounding', 'ImGuiStyleVar_WindowMinSize',
+    'ImGuiStyleVar_ItemSpacing', 'ImGuiStyleVar_ScrollbarSize', 'ImGuiStyleVar_ScrollbarRounding',
+    'ImGuiStyleVar_FramePadding', 'ImGuiStyleVar_FrameRounding', 'ImGuiStyleVar_FrameBorderSize',
+    'ImGuiStyleVar_PopupRounding', 'ImGuiStyleVar_PopupBorderSize', 'ImGuiTableFlags_SizingFixedFit',
+    'ImGuiCol_Button', 'ImGuiCol_ButtonHovered', 'ImGuiCol_ButtonActive', 'ImGuiCol_Text',
+    'ImGuiCol_ChildBg', 'ImGuiCol_PopupBg', 'ImGuiCol_Border', 'ImGuiCol_Separator',
+    'ImGuiCol_FrameBg', 'ImGuiCol_FrameBgHovered', 'ImGuiCol_FrameBgActive',
+    'ImGuiCol_Header', 'ImGuiCol_HeaderHovered', 'ImGuiCol_HeaderActive',
+    'ImGuiCol_ScrollbarBg', 'ImGuiCol_ScrollbarGrab', 'ImGuiCol_ScrollbarGrabHovered', 'ImGuiCol_ScrollbarGrabActive',
+    'ImGuiInputTextFlags_CharsDecimal', 'ImGuiInputTextFlags_EnterReturnsTrue', 'ImGuiInputTextFlags_AutoSelectAll',
+    'IMGUI_VERSION_NUM', 'ImDrawFlags_RoundCornersLeft', 'ImDrawFlags_RoundCornersAll',
+    'ImDrawCornerFlags_Left', 'ImDrawCornerFlags_All',
+}
+globals = { 'addon' }
+
+-- Generated from the server source (tools/gen_data.lua).
+exclude_files = { 'data/**', '.claude/**' }
+
+-- The runner defines the helpers every *_test.lua uses.
+files['tests/run.lua'] = { globals = { 'test', 'eq' } }
+files['tests/*_test.lua'] = { read_globals = { 'test', 'eq' } }
