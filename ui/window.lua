@@ -22,6 +22,7 @@ local data = require('core.data')
 local kit = require('ui.kit')
 local macros = require('core.macros')
 local replies = require('core.replies')
+local setup = require('core.setup')
 local drops = require('core.drops')
 local spawns = require('core.spawns')
 local store = require('core.store')
@@ -1849,6 +1850,94 @@ function zb_rows(pg, list, mine, zones)
     end
 end
 
+-- Setup ---------------------------------------------------------------------------------------------------------
+-- A test character in one go, for yourself (core/setup.lua): jobs and levels, unlocks, gil; the lines it sends,
+-- then Apply, or keep them as a macro (with {me}, so it works on any character).
+
+local JOBS = { set = 'jobs', send = 'name' }
+
+-- A job drop-down: (none) clears it.
+local function job_box(id, x, cy, w, value, set)
+    local e = value ~= '' and data.find(JOBS, value)
+    kit.dropdown(id, x, cy, w, e and e.label or '(none)', true, 1, function ()
+        if kit.selectable('(none)##' .. id .. '_none', value == '') then set('') end
+        for j, je in ipairs(data.list(JOBS)) do
+            if kit.selectable(je.label .. '##' .. id .. j, je == e) then set(je.name) end
+        end
+    end)
+end
+
+-- A small text box for `key` of `o`.
+local function setup_box(id, x, cy, w, o, key, hint, max)
+    local b = buf(id, o[key] or '')
+    kit.input(id, x, cy, w, b, max or 12, hint)
+    b.active = imgui.IsItemActive()
+    if b[1] ~= (o[key] or '') then
+        o[key] = b[1]
+        store.dirty()
+    end
+end
+
+local function setup_page(pg)
+    local o = view.cfg.setup
+    note(pg, 'A test character in one go, for yourself: what it sends shows below, in the order it goes.', P.text2)
+    local function switch(key, label, help)
+        local cy = line(pg, label, help)
+        local v, flipped = kit.switch('##gm_setup_' .. key, pg.right - S(kit.SW_W), cy, o[key] == true, true)
+        kit.tip(help)
+        if flipped then o[key] = v store.dirty() end
+    end
+    local w = S(FIELD_W)
+    subheader(pg, 'Jobs')
+    local cy = line(pg, 'Main job', 'The job !changejob gives you; (none) leaves yours')
+    job_box('##gm_setup_job', pg.right - w, cy, w, o.job, function (v) o.job = v store.dirty() end)
+    cy = line(pg, 'Level', 'Its level, 1 to 99')
+    setup_box('##gm_setup_level', pg.right - S(80), cy, S(80), o, 'level', '1 to 99', 3)
+    switch('master', 'Master it', 'Master the job too (the third word of !changejob)')
+    cy = line(pg, 'Sub job', 'The sub job !changesjob gives you (held to the server sub level cap)')
+    job_box('##gm_setup_sub', pg.right - w, cy, w, o.sub, function (v) o.sub = v store.dirty() end)
+    cy = line(pg, 'Sub level', 'Empty: the sub job level as it is')
+    setup_box('##gm_setup_sub_level', pg.right - S(80), cy, S(80), o, 'sub_level', 'as it is', 3)
+    subheader(pg, 'Unlocks')
+    for _, s in ipairs(setup.SWITCHES) do switch(s[1], s[2], s[3]) end
+    subheader(pg, 'Also')
+    cy = line(pg, 'Gil', 'Set your gil to this (!setgil); empty leaves it')
+    setup_box('##gm_setup_gil', pg.right - S(140), cy, S(140), o, 'gil', 'as it is', 10)
+    switch('restore', 'Full HP and MP', 'Last, HP and MP to full')
+    -- what it sends
+    local me = view.me and view.me.name
+    local lines, why = setup.lines(o, me)
+    pg.y = pg.y + S(8)
+    local d = pg.dl
+    local rows = lines and #lines or 1
+    local bx, bw, by = pg.lx - S(6), pg.right - pg.lx + S(6), pg.y
+    local bh = rows * S(20) + S(10)
+    kit.fill(d, bx, by, bw, bh, P.well, S(4), 0.8)
+    kit.outline(d, bx, by, bw, bh, lines and P.line or kit.mix(P.well, P.rose, 0.5), S(4))
+    for k = 1, rows do
+        local s_ = lines and (k .. '.  ' .. lines[k]) or tostring(why)
+        kit.text_mid(d, pg.lx, by + S(5) + (k - 0.5) * S(20), kit.fit(s_, bw - S(12), kit.fonts.text, S(SMALL + 0.5)),
+            lines and P.accent2 or P.rose, kit.fonts.text, S(SMALL + 0.5))
+    end
+    pg.y = by + bh + S(8)
+    local bcy = pg.y + S(14)
+    pg.y = pg.y + S(32)
+    local aw = kit.button_width('Apply')
+    if kit.button('##gm_setup_apply', pg.right - aw, bcy, 'Apply', 'accent', lines ~= nil) then
+        act.send_lines(lines, 'Setup')
+    end
+    kit.tip(lines and ('Send these %d lines, in order'):format(#lines) or tostring(why))
+    local mw = kit.button_width('Keep as macro')
+    if kit.button('##gm_setup_macro', pg.right - aw - S(6) - mw, bcy, 'Keep as macro', 'ghost', lines ~= nil) then
+        local list = view.cfg.macros
+        local m = { name = macros.fresh_name(list, setup.name(o)), lines = setup.lines(o, '{me}') }
+        list[#list + 1] = m
+        store.dirty()
+        act.toast(('Kept as the macro "%s" (/gmt macro %s).'):format(m.name, m.name))
+    end
+    kit.tip('A macro of these lines, with {me} for your name: it sets up any character it runs on')
+end
+
 local SEND_MODES = { { 'packet', 'Packet' }, { 'typed', 'Typed' } }
 local LEVELS = { 'Any', '1', '2', '3', '4', '5' }
 
@@ -1908,7 +1997,7 @@ end
 -- Sidebar -------------------------------------------------------------------------------------------------------
 
 local FOOT = { { 'console', 'Console' }, { 'history', 'History' }, { 'macros', 'Macros' }, { 'places', 'Places' },
-               { 'settings', 'Settings' } }
+               { 'setup', 'Setup' }, { 'settings', 'Settings' } }
 
 local function nav_item(id, title, x, y, w, count)
     local d, ih = dl(), S(NAV_H)
@@ -2007,7 +2096,8 @@ local function close_mark(id, cx, cy, box)
 end
 
 local TITLES = { favorites = 'Favorites', target = 'Target', players = 'Players', nearby = 'Nearby', zones = 'Zone Browser', console = 'Console',
-                 history = 'History', settings = 'Settings', search = 'Search', macros = 'Macros', places = 'Places' }
+                 history = 'History', settings = 'Settings', search = 'Search', macros = 'Macros', places = 'Places',
+                 setup = 'Setup' }
 
 local function page_title(id)
     if TITLES[id] then return TITLES[id] end
@@ -2059,6 +2149,7 @@ local function page(x, y, w, h)
             elseif id == 'settings' then settings_page(pg)
             elseif id == 'macros' then macros_page(pg)
             elseif id == 'places' then places_page(pg)
+            elseif id == 'setup' then setup_page(pg)
             else commands_page(pg, id) end
             imgui.SetCursorScreenPos({ cx, pg.y })
             imgui.Dummy({ 1, S(12) })  -- drawn content has no item: this tells the child how far it scrolls

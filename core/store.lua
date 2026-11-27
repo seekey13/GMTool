@@ -22,6 +22,11 @@ store.DEFAULTS = {
     forms = {},            -- [command key] = { [arg index] = value }
     macros = {},           -- { name, lines = { '!hp 99999 {who}', ... } } (core/macros.lua)
     places = {},           -- { name, x, y, z, zone }: where you stood, for !pos
+    setup = {              -- the Setup page's test character (core/setup.lua)
+        job = '', level = '75', master = false, sub = '', sub_level = '',
+        skills = true, spells = false, ws = false, trusts = false, maps = false, mounts = false, attachments = false,
+        gil = '', restore = true,
+    },
     seq = 0,               -- the last stable id given (a macro's, a place's, a history line's `uid`)
 }
 

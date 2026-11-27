@@ -67,7 +67,7 @@ local function open_all()
 end
 
 -- Every page, so every page's own code runs.
-local PAGES = { 'favorites', 'target', 'players', 'nearby', 'zones', 'console', 'history', 'settings', 'macros', 'places' }
+local PAGES = { 'favorites', 'target', 'players', 'nearby', 'zones', 'console', 'history', 'settings', 'macros', 'places', 'setup' }
 for _, p in ipairs(catalog.PAGES) do PAGES[#PAGES + 1] = p[1] end
 
 test('every page draws, every card open, every list shown', function ()
@@ -835,4 +835,27 @@ test('zone browser: All zones finds a mob in any zone, each row its zone', funct
     data.res.zone = function (zid) return zid == 230 and 'Southern San d\'Oria' or nil end
     data.reset()
     window.state.zb = nil
+end)
+
+test('setup: pick jobs, Apply sends the lines in order, Keep as macro keeps them with {me}', function ()
+    fresh()
+    window.state.page = 'setup'
+    frame()
+    assert(fake.drew('!capallskills'), 'the default: cap skills, then HP and MP')
+    frame({ ['WHM (3)####gm_setup_job3'] = true })
+    eq(store.cfg.setup.job, 'WHM')
+    frame({ ['##gm_setup_level'] = '99' })
+    frame({ ['##gm_setup_spells'] = true })
+    eq(store.cfg.setup.spells, true)
+    frame()
+    assert(fake.drew('1.  !changejob WHM 99'), 'the first line')
+    frame({ ['##gm_setup_apply'] = true })
+    eq(calls.lines[1].lines, { '!changejob WHM 99', '!capallskills', '!addallspells Seekey', '!hp 99999 Seekey', '!mp 99999 Seekey' })
+    frame({ ['##gm_setup_macro'] = true })
+    local m = store.cfg.macros[#store.cfg.macros]
+    eq(m.name, 'Setup WHM 99')
+    eq(m.lines[3], '!addallspells {me}')
+    frame({ ['##gm_setup_level'] = '0' })
+    frame({ ['##gm_setup_apply'] = true })
+    eq(#calls.lines, 0, 'a bad level: Apply is off')
 end)
