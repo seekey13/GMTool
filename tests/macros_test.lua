@@ -148,7 +148,7 @@ test('import: tidies lines, says which it left out', function ()
     eq(ps, {})
     local lines = {}
     for _, b in ipairs(bad) do lines[#lines + 1] = b[1] end
-    eq(lines, { 1, 4, 5, 6 }, 'before any macro, not ASCII, no name, not a place')
+    eq(lines, { 1, 4, 5, 6, 9 }, 'before any macro, not ASCII, no name, not a place, no lines')
 end)
 
 test('merge: the same skipped, a taken name renamed', function ()
@@ -160,4 +160,33 @@ test('merge: the same skipped, a taken name renamed', function ()
     eq(list[3].name, 'New')
     local places = { { name = 'Home', x = 1, y = 2, z = 3, zone = 230 } }
     eq({ macros.merge(places, { { name = 'Home', x = 1.0004, y = 2, z = 3, zone = 230 } }, macros.same_place) }, { 0, 1 })
+end)
+
+test('import: a place in plain numbers within the map, a name in plain ASCII, at most so many', function ()
+    local _, ps, bad = macros.import('@ a:b: -0.5 2 3 230\n@ x: 1e999 0 0 230\n@ y: 0x10 0 0 230\n@ z: 1 2 3 99999\n'
+        .. '@ caf\195\169: 1 2 3 230\n[A\0B]\n!hide')
+    eq(#ps, 1, 'only the first')
+    eq(ps[1].name, 'a:b', 'a colon in a name')
+    eq(#bad, 6, 'inf, hex, no such zone, a non-ASCII name, a control character; and its line after it')
+    local many = {}
+    for i = 1, macros.IMPORT_MAX + 5 do many[#many + 1] = ('[M%d]\n!hide'):format(i) end
+    local ms, _, bad2 = macros.import(table.concat(many, '\n'))
+    eq(#ms, macros.IMPORT_MAX)
+    assert(#bad2 >= 5, 'the rest said')
+    eq(macros.import('[' .. ('x'):rep(41) .. ']\n!hide'), {}, 'a name too long')
+end)
+
+test('merge: pasting the same text twice adds it once', function ()
+    local list = { { name = 'A', lines = { '!hp 2 {who}' } } }
+    local function paste() return macros.merge(list, { { name = 'A', lines = { '!hp 1 {who}' } } }, macros.same_macro) end
+    eq({ paste() }, { 1, 0 })
+    eq(list[2].name, 'A 2')
+    eq({ paste() }, { 0, 1 }, 'A 2 is it already')
+    eq(#list, 2)
+end)
+
+test('export: a macro or place with no name keeps one', function ()
+    local text = macros.export({ { name = '', lines = { '!hide' } } }, { { name = ' ', x = 1, y = 2, z = 3, zone = 230 } })
+    local ms, ps, bad = macros.import(text)
+    eq({ #ms, #ps, #bad }, { 1, 1, 0 })
 end)

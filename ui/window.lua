@@ -1761,8 +1761,8 @@ local function zones_page(pg)
     end
     if every then
         local q, kind = util.trim(zb.q[1]), ZB_KINDS[zb.kind][1]
-        if #q < 2 and kind ~= 'nm' then
-            note(pg, 'Type two letters or more of a name (or pick NMs): every zone is searched.', P.text2)
+        if (q:match('^%d+$') and #q < 5) or (#q < 2 and kind ~= 'nm') then
+            note(pg, 'Type two letters or more of a name, or a whole server id (or pick NMs): every zone is searched.', P.text2)
             return
         end
         local done, n, total = spawns.step(30)

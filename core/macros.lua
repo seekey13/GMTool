@@ -227,20 +227,41 @@ end
 function macros.export(ms, ps)
     local out = { '# GM Tool: macros ([name], then its lines) and places (@ name: x y z zone)' }
     for _, m in ipairs(ms or {}) do
-        out[#out + 1] = '[' .. util.trim(m.name) .. ']'
+        out[#out + 1] = '[' .. (util.trim(m.name) ~= '' and util.trim(m.name) or 'Macro') .. ']'
         for _, l in ipairs(m.lines or {}) do
             if util.trim(l) ~= '' then out[#out + 1] = util.trim(l) end
         end
     end
     for _, p in ipairs(ps or {}) do
-        out[#out + 1] = ('@ %s: %s %s %s %d'):format(util.trim(p.name), macros.coord(p.x), macros.coord(p.y), macros.coord(p.z),
+        out[#out + 1] = ('@ %s: %s %s %s %d'):format(util.trim(p.name) ~= '' and util.trim(p.name) or 'Place', macros.coord(p.x), macros.coord(p.y), macros.coord(p.z),
             p.zone)
     end
     return table.concat(out, '\n')
 end
 
+macros.IMPORT_MAX = 100  -- macros, and places, one paste adds at most
+macros.NAME_MAX = 40
+
+-- A pasted name, or nil and why: printable ASCII (it's saved in the settings file), NAME_MAX at most.
+local function name_of(s)
+    s = util.trim(s)
+    if s == '' then return nil, 'a name is needed' end
+    if s:find('[^\32-\126]') then return nil, 'a name is plain letters, digits and signs (ASCII)' end
+    if #s > macros.NAME_MAX then return nil, ('a name is %d characters at most'):format(macros.NAME_MAX) end
+    return s
+end
+
+-- A pasted coordinate: a plain number, as !pos takes it (no 1e5, 0x10, inf), within the map.
+local function coord_of(s)
+    if not util.is_num(s) then return nil end
+    local n = tonumber(s)
+    if n ~= n or math.abs(n) > 100000 then return nil end
+    return n
+end
+
 -- What text `s` holds: macros, places, and the lines it couldn't read ({ line number, why }). Each macro line is
--- checked as a typed line would be (ASCII, within the server's length...), placeholders and all.
+-- checked as a typed line would be (ASCII, within the server's length...), placeholders and all; a name and a
+-- place's numbers too. At most IMPORT_MAX macros and IMPORT_MAX places.
 function macros.import(s)
     local ms, ps, bad = {}, {}, {}
     local cur
@@ -250,22 +271,29 @@ function macros.import(s)
         local l = util.trim(raw:gsub('\r$', ''))
         if l == '' or l:sub(1, 1) == '#' then  -- luacheck: ignore 542 (nothing to do)
         elseif l:match('^%[.*%]$') then
-            local name = util.trim(l:sub(2, -2))
-            if name == '' then bad[#bad + 1] = { n, 'a macro needs a name' } cur = nil
+            local name, why = name_of(l:sub(2, -2))
+            cur = nil
+            if not name then bad[#bad + 1] = { n, 'a macro\'s name: ' .. why }
+            elseif #ms >= macros.IMPORT_MAX then bad[#bad + 1] = { n, ('%d macros at most a paste'):format(macros.IMPORT_MAX) }
             else
-                cur = { name = name, lines = {} }
+                cur = { name = name, lines = {}, at = n }
                 ms[#ms + 1] = cur
             end
         elseif l:sub(1, 1) == '@' then
-            local name, x, y, z, zone = l:match('^@%s*(.-)%s*:%s*(%S+)%s+(%S+)%s+(%S+)%s+(%d+)$')
-            x, y, z, zone = tonumber(x), tonumber(y), tonumber(z), tonumber(zone)
-            if name and name ~= '' and x and y and z and zone then
-                ps[#ps + 1] = { name = name, x = x, y = y, z = z, zone = zone }
+            local pname, x, y, z, zone = l:match('^@%s*(.-)%s*:%s*(%S+)%s+(%S+)%s+(%S+)%s+(%d+)$')
+            local name, why = name_of(pname or '')
+            x, y, z, zone = coord_of(x), coord_of(y), coord_of(z), tonumber(zone)
+            if not (pname and x and y and z and zone and zone <= 1023) then
+                bad[#bad + 1] = { n, 'a place is "@ name: x y z zone", in plain numbers' }
+            elseif not name then
+                bad[#bad + 1] = { n, 'a place\'s name: ' .. why }
+            elseif #ps >= macros.IMPORT_MAX then
+                bad[#bad + 1] = { n, ('%d places at most a paste'):format(macros.IMPORT_MAX) }
             else
-                bad[#bad + 1] = { n, 'a place is "@ name: x y z zone"' }
+                ps[#ps + 1] = { name = name, x = x, y = y, z = z, zone = zone }
             end
         elseif not cur then
-            bad[#bad + 1] = { n, 'a line before any [macro name]' }
+            bad[#bad + 1] = { n, 'a line with no [macro name] before it' }
         elseif #cur.lines >= macros.MAX_LINES then
             bad[#bad + 1] = { n, ('a macro holds %d lines at most'):format(macros.MAX_LINES) }
         else
@@ -274,7 +302,11 @@ function macros.import(s)
         end
     end
     local kept = {}
-    for _, m in ipairs(ms) do if #m.lines > 0 then kept[#kept + 1] = m end end
+    for _, m in ipairs(ms) do
+        if #m.lines > 0 then kept[#kept + 1] = m else bad[#bad + 1] = { m.at, ('[%s] has no lines'):format(m.name) } end
+        m.at = nil
+    end
+    table.sort(bad, function (a, b) return a[1] < b[1] end)
     return kept, ps, bad
 end
 
@@ -283,8 +315,18 @@ end
 function macros.merge(list, incoming, same)
     local added, skipped = 0, 0
     for _, x in ipairs(incoming) do
+        -- the same as one named it, or as 'it 2', 'it 3' (one a paste before renamed): already here
+        local base = util.trim(x.name):lower()
+        local dup = false
+        for _, m in ipairs(list) do
+            local n = util.trim(m.name):lower()
+            if (n == base or (n:sub(1, #base + 1) == base .. ' ' and n:sub(#base + 2):match('^%d+$'))) and same(m, x) then
+                dup = true
+                break
+            end
+        end
         local have = macros.find(list, x.name)
-        if have and same(have, x) then
+        if dup then
             skipped = skipped + 1
         else
             if have then x.name = macros.fresh_name(list, x.name) end
