@@ -777,3 +777,29 @@ test('status effects: an older listing still shows when a later send took the an
     replies.reset()
     window.state.pl = nil
 end)
+
+test('macros and places: Copy all to the clipboard, Paste adds them', function ()
+    fresh()
+    local clip
+    rawset(fake.imgui, 'SetClipboardText', function (s) clip = s end)
+    rawset(fake.imgui, 'GetClipboardText', function () return clip end)
+    store.cfg.macros = { { name = 'Restore', lines = { '!hp 99999 {who}' } } }
+    store.cfg.places = { { name = 'Home', x = 1, y = 2, z = 3, zone = 230 } }
+    window.state.page = 'macros'
+    frame({ ['##gm_mac_copy'] = true })
+    assert(clip and clip:find('[Restore]', 1, true), 'copied')
+    clip = clip .. '\n[Hide]\n!hide\n@ Jeuno: 4 5 6 246\nbad \195\169 line'
+    frame({ ['##gm_mac_paste'] = true })
+    eq(#store.cfg.macros, 2, 'Restore was there already: Hide added')
+    eq(store.cfg.macros[2].name, 'Hide')
+    eq(store.cfg.places[2].name, 'Jeuno', 'a place pasted on the Macros page goes to Places')
+    assert(calls.toast[1].text:find('1 line left out'), calls.toast[1].text)
+    window.state.page = 'places'
+    frame({ ['##gm_place_copy'] = true })
+    assert(clip:find('@ Jeuno: 4 5 6 246', 1, true) and not clip:find('[Restore]', 1, true), 'places only')
+    clip = ''
+    frame({ ['##gm_place_paste'] = true })
+    eq(calls.toast[1].kind, 'error', 'an empty clipboard says so')
+    rawset(fake.imgui, 'SetClipboardText', nil)
+    rawset(fake.imgui, 'GetClipboardText', nil)
+end)

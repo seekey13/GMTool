@@ -215,4 +215,94 @@ function macros.here(name, ctx)
     return { name = name, x = p.x, y = p.y, z = p.z, zone = ctx.zone }
 end
 
+-- Sharing ---------------------------------------------------------------------------------------------------
+-- Macros and places as text, to copy and paste (to another character, another GM, a message):
+--     [Restore]
+--     !hp 99999 {who}
+--     !mp 99999 {who}
+--     @ Jeuno AH: -12.5 0 33.25 246
+-- A [name] line starts a macro, and the lines after it are its own; an @ line is a place: its name, then after a
+-- colon x y z and its zone. Blank lines and # comments are left out.
+
+function macros.export(ms, ps)
+    local out = { '# GM Tool: macros ([name], then its lines) and places (@ name: x y z zone)' }
+    for _, m in ipairs(ms or {}) do
+        out[#out + 1] = '[' .. util.trim(m.name) .. ']'
+        for _, l in ipairs(m.lines or {}) do
+            if util.trim(l) ~= '' then out[#out + 1] = util.trim(l) end
+        end
+    end
+    for _, p in ipairs(ps or {}) do
+        out[#out + 1] = ('@ %s: %s %s %s %d'):format(util.trim(p.name), macros.coord(p.x), macros.coord(p.y), macros.coord(p.z),
+            p.zone)
+    end
+    return table.concat(out, '\n')
+end
+
+-- What text `s` holds: macros, places, and the lines it couldn't read ({ line number, why }). Each macro line is
+-- checked as a typed line would be (ASCII, within the server's length...), placeholders and all.
+function macros.import(s)
+    local ms, ps, bad = {}, {}, {}
+    local cur
+    local n = 0
+    for raw in (tostring(s or '') .. '\n'):gmatch('([^\n]*)\n') do
+        n = n + 1
+        local l = util.trim(raw:gsub('\r$', ''))
+        if l == '' or l:sub(1, 1) == '#' then  -- luacheck: ignore 542 (nothing to do)
+        elseif l:match('^%[.*%]$') then
+            local name = util.trim(l:sub(2, -2))
+            if name == '' then bad[#bad + 1] = { n, 'a macro needs a name' } cur = nil
+            else
+                cur = { name = name, lines = {} }
+                ms[#ms + 1] = cur
+            end
+        elseif l:sub(1, 1) == '@' then
+            local name, x, y, z, zone = l:match('^@%s*(.-)%s*:%s*(%S+)%s+(%S+)%s+(%S+)%s+(%d+)$')
+            x, y, z, zone = tonumber(x), tonumber(y), tonumber(z), tonumber(zone)
+            if name and name ~= '' and x and y and z and zone then
+                ps[#ps + 1] = { name = name, x = x, y = y, z = z, zone = zone }
+            else
+                bad[#bad + 1] = { n, 'a place is "@ name: x y z zone"' }
+            end
+        elseif not cur then
+            bad[#bad + 1] = { n, 'a line before any [macro name]' }
+        elseif #cur.lines >= macros.MAX_LINES then
+            bad[#bad + 1] = { n, ('a macro holds %d lines at most'):format(macros.MAX_LINES) }
+        else
+            local line, why = build.tidy(l)
+            if line then cur.lines[#cur.lines + 1] = line else bad[#bad + 1] = { n, why } end
+        end
+    end
+    local kept = {}
+    for _, m in ipairs(ms) do if #m.lines > 0 then kept[#kept + 1] = m end end
+    return kept, ps, bad
+end
+
+-- Adds `incoming` (macros or places) to `list`: one the same as one there (name and all) is skipped, one whose name
+-- is taken gets 'name 2'. `same(a, b)` says whether two are the same. Returns how many were added and skipped.
+function macros.merge(list, incoming, same)
+    local added, skipped = 0, 0
+    for _, x in ipairs(incoming) do
+        local have = macros.find(list, x.name)
+        if have and same(have, x) then
+            skipped = skipped + 1
+        else
+            if have then x.name = macros.fresh_name(list, x.name) end
+            list[#list + 1] = x
+            added = added + 1
+        end
+    end
+    return added, skipped
+end
+
+function macros.same_macro(a, b)
+    if #a.lines ~= #b.lines then return false end
+    for i = 1, #a.lines do if util.trim(a.lines[i]) ~= util.trim(b.lines[i]) then return false end end
+    return true
+end
+
+function macros.same_place(a, b)
+    return a.zone == b.zone and macros.coord(a.x) == macros.coord(b.x) and macros.coord(a.y) == macros.coord(b.y)
+        and macros.coord(a.z) == macros.coord(b.z)
+end
 return macros

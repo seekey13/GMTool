@@ -1043,6 +1043,29 @@ local function macro_editor(pg, m, i)
     pg.y = pg.y + S(6)
 end
 
+-- Copies macros `ms` and places `ps` as text (core/macros.lua's), for another character or GM to paste.
+local function copy_shared(ms, ps, what)
+    imgui.SetClipboardText(macros.export(ms, ps))
+    act.toast(('Copied %s: paste it on another character\'s Macros or Places page, or share it.'):format(what))
+end
+
+-- Adds the macros and places on the clipboard: the same ones skipped, a name taken made 'name 2'.
+local function paste_shared()
+    local text = imgui.GetClipboardText()
+    if type(text) ~= 'string' or util.trim(text) == '' then return act.toast('The clipboard is empty.', 'error') end
+    local ms, ps, bad = macros.import(text)
+    local first = bad[1] and (' (line %d: %s)'):format(bad[1][1], bad[1][2]) or ''
+    if #ms == 0 and #ps == 0 then return act.toast('No macros or places on the clipboard' .. first .. '.', 'error') end
+    local am, sm = macros.merge(view.cfg.macros, ms, macros.same_macro)
+    local ap, sp = macros.merge(view.cfg.places, ps, macros.same_place)
+    store.dirty()
+    local function n(k, w) return ('%d %s%s'):format(k, w, k == 1 and '' or 's') end
+    local msg = ('Added %s and %s.'):format(n(am, 'macro'), n(ap, 'place'))
+    if sm + sp > 0 then msg = msg .. (' %d already here.'):format(sm + sp) end
+    if #bad > 0 then msg = msg .. (' %s left out%s.'):format(n(#bad, 'line'), first) end
+    act.toast(msg, #bad > 0 and 'warn' or 'info')
+end
+
 local function macros_page(pg)
     local list = view.cfg.macros
     note(pg, 'A macro sends its lines in order, through the same queue as everything else. In a line, ' .. PLACEHOLDERS,
@@ -1063,6 +1086,16 @@ local function macros_page(pg)
         store.dirty()
     end
     kit.tip('Restore, Revive here, Bring and restore, Go incognito, Punching bag')
+    do
+        local pw = kit.button_width('Paste')
+        if kit.button('##gm_mac_paste', pg.right - pw, cy, 'Paste', 'ghost') then paste_shared() end
+        kit.tip('Add the macros (and places) copied from GM Tool on the clipboard')
+        local cw = kit.button_width('Copy all')
+        if kit.button('##gm_mac_copy', pg.right - pw - S(6) - cw, cy, 'Copy all', 'ghost', #list > 0) then
+            copy_shared(list, nil, ('%d macro%s'):format(#list, #list == 1 and '' or 's'))
+        end
+        kit.tip('Put every macro on the clipboard as text, to paste on another character or share')
+    end
     if #list == 0 then note(pg, 'No macros yet. /gmt macro <name> runs one from chat or a game macro.', P.dim) return end
     local remove
     for i, m in ipairs(list) do
@@ -1141,6 +1174,17 @@ local function places_page(pg)
         else
             act.toast(why, 'error')
         end
+    end
+    do
+        local scy = line(pg, 'Share', 'Copy your places as text to paste on another character or share; paste ones copied.')
+        local pw = kit.button_width('Paste')
+        if kit.button('##gm_place_paste', pg.right - pw, scy, 'Paste', 'ghost') then paste_shared() end
+        kit.tip('Add the places (and macros) copied from GM Tool on the clipboard')
+        local cw = kit.button_width('Copy all')
+        if kit.button('##gm_place_copy', pg.right - pw - S(6) - cw, scy, 'Copy all', 'ghost', #list > 0) then
+            copy_shared(nil, list, ('%d place%s'):format(#list, #list == 1 and '' or 's'))
+        end
+        kit.tip('Put every place on the clipboard as text')
     end
     if #list == 0 then note(pg, 'No places saved. /gmt place <name> [player] goes to one from chat.', P.dim) return end
     subheader(pg, 'Saved')

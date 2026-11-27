@@ -127,3 +127,37 @@ test('party: lines before the first {who} go once first, after the last once las
     local _, _, f2 = macros.lines({ name = 'x', lines = { '!hp 1 {who}' } }, ctx('me'))
     eq(f2, false, 'not party: no fan')
 end)
+
+-- Sharing ------------------------------------------------------------------------------------------------------
+
+test('export and import: macros and places as text, round trip', function ()
+    local ms = { { name = 'Restore', lines = { '!hp 99999 {who}', '', '!mp 99999 {who}' } }, { name = 'Hide', lines = { '!hide' } } }
+    local ps = { { name = 'Jeuno AH', x = -12.5, y = 0, z = 33.25, zone = 246 } }
+    local text = macros.export(ms, ps)
+    assert(text:find('[Restore]\n!hp 99999 {who}\n!mp 99999 {who}', 1, true), text)
+    assert(text:find('@ Jeuno AH: -12.5 0 33.25 246', 1, true), text)
+    local ms2, ps2, bad = macros.import(text)
+    eq(bad, {})
+    eq(ms2, { { name = 'Restore', lines = { '!hp 99999 {who}', '!mp 99999 {who}' } }, { name = 'Hide', lines = { '!hide' } } })
+    eq(ps2, ps)
+end)
+
+test('import: tidies lines, says which it left out', function ()
+    local ms, ps, bad = macros.import('stray line\r\n[ Fix ]\nhp  1   {me}\n!x \195\169\n[]\n@ nowhere\n# a note\n\n[Empty]\n')
+    eq(ms, { { name = 'Fix', lines = { '!hp 1 {me}' } } }, 'tidied; an empty macro left out')
+    eq(ps, {})
+    local lines = {}
+    for _, b in ipairs(bad) do lines[#lines + 1] = b[1] end
+    eq(lines, { 1, 4, 5, 6 }, 'before any macro, not ASCII, no name, not a place')
+end)
+
+test('merge: the same skipped, a taken name renamed', function ()
+    local list = { { name = 'Restore', lines = { '!hp 1 {who}' } } }
+    local added, skipped = macros.merge(list, { { name = 'Restore', lines = { '!hp 1 {who}' } },
+        { name = 'restore', lines = { '!hp 2 {who}' } }, { name = 'New', lines = { '!hide' } } }, macros.same_macro)
+    eq({ added, skipped }, { 2, 1 })
+    eq(list[2].name, 'restore 2')
+    eq(list[3].name, 'New')
+    local places = { { name = 'Home', x = 1, y = 2, z = 3, zone = 230 } }
+    eq({ macros.merge(places, { { name = 'Home', x = 1.0004, y = 2, z = 3, zone = 230 } }, macros.same_place) }, { 0, 1 })
+end)
