@@ -179,6 +179,19 @@ local function party_names()
     return out
 end
 
+-- For a click on a control that can't show it's armed (a preset chip): true on the second click within ARMED
+-- seconds, or at once with confirming off; the first says to click again.
+local function confirmed(id, what)
+    if view.cfg.send.confirm == false then return true end
+    if state.armed[id] and view.now - state.armed[id] < ARMED then
+        state.armed[id] = nil
+        return true
+    end
+    state.armed[id] = view.now
+    act.toast(('%s: click again to send it.'):format(what), 'warn')
+    return false
+end
+
 -- The context build.line takes: you, your target and the "acting on" choice.
 local function ctx()
     local a, me = view.cfg.acting, view.me
@@ -275,8 +288,9 @@ end
 -- (core/build.lua's own rule, so the hint and the line never disagree.)
 local function player_hint(c, a)
     if view.cfg.acting.mode == 'party' and not c.danger then
+        if c.one then return 'type the name: one player' end
         local n = #party_names()
-        if a.who == 'none' then n = n - 1 end
+        if c.notself and view.me then n = n - 1 end
         return n > 0 and ('each of your party (%d)'):format(n) or 'no one in your party'
     end
     local d, why = build.default_player(c, a, ctx())
@@ -497,6 +511,8 @@ local function card_head(pg, c, tag)
     local clicked, bw
     if c.danger then
         clicked, bw = guarded('##gm_send_' .. c.key, right, cy, 'Send', 'danger', true, true)
+    elseif lines and #lines > 1 then  -- a line apiece to a party: two clicks
+        clicked, bw = guarded('##gm_send_' .. c.key, right, cy, 'Send', 'accent', true, true)
     else
         clicked, bw = kit.button('##gm_send_' .. c.key, right - kit.button_width('Send'), cy, 'Send', 'accent')
     end
@@ -573,7 +589,11 @@ local function card_body(pg, c)
                 local v = {}
                 for k = 1, #c.args do v[k] = values[k] end
                 for k, pv in ipairs(p[2]) do v[k] = pv end
-                send_card(c, v)
+                local lines = build.lines(c, v, ctx())
+                if not (lines and #lines > 1) or confirmed(('##gm_pre_%s_%d'):format(c.key, j),
+                    ('%s to %d players'):format(p[1], #lines)) then
+                    send_card(c, v)
+                end
             end
             kit.tip(('Send with %s'):format(table.concat(p[2], ' ')))
             x = x + w + S(6)
@@ -635,8 +655,11 @@ local function card(pg, c, tag)
         kit.line(pg.dl, pg.x + S(PAD), pg.y - S(4), pg.right, pg.y - S(4), P.line, 0.6)
         if state.enter == c.key then  -- Enter in one of its boxes: as its Send (a risky one still asks twice)
             state.enter = nil
+            local lines = build.lines(c, store.form(c.key), ctx())
             if c.danger and view.cfg.send.confirm ~= false then
                 act.toast('A risky command: press its Send.', 'warn')
+            elseif lines and #lines > 1 and view.cfg.send.confirm ~= false then
+                act.toast(('A line for each of %d players: press its Send.'):format(#lines), 'warn')
             else
                 send_card(c, store.form(c.key))
             end
@@ -978,7 +1001,11 @@ local function macro_editor(pg, m, i)
     for j = 1, #m.lines do
         local lcy = line(pg, nil)
         local ok_line, why = true, nil
-        if util.trim(m.lines[j]) ~= '' then ok_line, why = macros.expand(m.lines[j], ctx()) end
+        if util.trim(m.lines[j]) ~= '' then
+            local c_ = ctx()
+            if c_.mode == 'party' then c_.mode, c_.name = 'name', c_.party[1] end  -- {who} as one of them
+            ok_line, why = macros.expand(m.lines[j], c_)
+        end
         kit.circle(d, pg.lx + S(4), lcy, S(3), ok_line and P.teal or P.rose)
         if not ok_line and kit.over(pg.lx - S(4), lcy - S(10), S(16), S(20)) then kit.tooltip(why) end
         plain_box(('##gm_mac_%d_l%d'):format(i, j), pg.lx + S(16), lcy, pg.right - pg.lx - S(44), m.lines[j],
@@ -1044,10 +1071,13 @@ local function macros_page(pg)
         if kit.over(pg.x + S(4), y, pg.w - S(8), h) then kit.fill(d, pg.x + S(4), y, pg.w - S(8), h, P.hover, S(3), 0.8) end
         local rw = kit.button_width('Run')
         local rx = pg.right - rw
-        local lines, why = macros.lines(m, ctx())
+        local lines, why, fans = macros.lines(m, ctx())
+        fans = lines and fans  -- (a failure's third value is the line it failed on)
         local run
         if why == true then  -- risky: two clicks
             run = guarded('##gm_mac_run_' .. uid_of(m), pg.right, hcy, 'Run', 'danger', true, true)
+        elseif fans then  -- to each of a party: two clicks
+            run = guarded('##gm_mac_run_' .. uid_of(m), pg.right, hcy, 'Run', 'accent', true, true)
         else
             run = kit.button('##gm_mac_run_' .. uid_of(m), rx, hcy, 'Run', 'accent')
         end
@@ -1115,6 +1145,12 @@ local function places_page(pg)
     subheader(pg, 'Saved')
     local remove
     local who = macros.value('who', c)
+    -- under Party: each member but you (Go is yours)
+    local members
+    if c.mode == 'party' then
+        members = {}
+        for _, n in ipairs(c.party or {}) do if not (c.me and n:lower() == c.me:lower()) then members[#members + 1] = n end end
+    end
     for i, p in ipairs(list) do
         local y = pg.y
         local lcy = line(pg, nil)
@@ -1126,10 +1162,23 @@ local function places_page(pg)
             end
             kit.tip('Put yourself here')
             local tx = pg.right - gw - S(6) - tw_
-            if kit.button('##gm_place_send_' .. uid_of(p), tx, lcy, 'Send', 'ghost', who ~= nil) then
-                act.send(macros.place_line(p, who, zone_of(who)), { cursor = false })
+            if members then
+                local sid = '##gm_place_send_' .. uid_of(p)
+                local pressed, aw = guarded(sid, tx + tw_, lcy, 'Send', 'ghost', #members > 0, true)
+                tw_ = aw or tw_
+                tx = pg.right - gw - S(6) - tw_
+                if pressed then
+                    local lines = {}
+                    for k, n in ipairs(members) do lines[k] = macros.place_line(p, n, zone_of(n)) end
+                    act.send_lines(lines, p.name)
+                end
+                kit.tip(#members > 0 and ('Put each of your party here: ' .. table.concat(members, ', ')) or 'No one in your party')
+            else
+                if kit.button('##gm_place_send_' .. uid_of(p), tx, lcy, 'Send', 'ghost', who ~= nil) then
+                    act.send(macros.place_line(p, who, zone_of(who)), { cursor = false })
+                end
+                kit.tip(who and ('Put %s here'):format(who) or 'Acting on names no player now')
             end
-            kit.tip(who and ('Put %s here'):format(who) or 'Acting on names no player now')
             if delete_mark('##gm_place_del_' .. uid_of(p), tx - S(16), lcy) then remove = i end
             kit.text_mid(d, pg.lx, lcy, kit.fit(p.name, S(150), kit.fonts.semi, S(BODY - 1)), P.white, kit.fonts.semi, S(BODY - 1))
             local info = ('%s  %s %s %s'):format(data.zone_name(p.zone) or ('zone ' .. p.zone), macros.coord(p.x),
@@ -1916,6 +1965,7 @@ local function bar_body()
             local id = '##gmbar_' .. c.key
             local clicked, w
             if c.danger then clicked, w = guarded(id, x, cy, it.label, 'danger')
+            elseif lines and #lines > 1 then clicked, w = guarded(id, x, cy, it.label, 'ghost')
             else clicked, w = kit.button(id, x, cy, it.label, 'ghost') end
             kit.tip(lines and sends_tip(lines) or ('Can\'t send yet (' .. tostring(why) .. '): a click opens its form'))
             if clicked then

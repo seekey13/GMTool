@@ -89,7 +89,7 @@ end
 
 local function has_who(l) return l:lower():find('{who}', 1, true) ~= nil end
 
--- The lines of `m` that `keep(l)` keeps (every one, for none), expanded: lines, risky; or nil, why, line number.
+-- The lines of `m` that `keep(i, l)` keeps (every one, for none), expanded: lines, risky; or nil, why, line number.
 local function expand_all(m, ctx, keep)
     local out, risky = {}, false
     for i, l in ipairs(m.lines or {}) do
@@ -100,7 +100,7 @@ local function expand_all(m, ctx, keep)
                     return nil, ('line %d: a risky command never takes its name from {who} or {target}: type it'):format(i), i
                 end
             end
-            if not keep or keep(l) then
+            if not keep or keep(i, l) then
                 local line, why = macros.expand(l, ctx)
                 if not line then return nil, ('line %d: %s'):format(i, why), i end
                 out[#out + 1] = line
@@ -110,40 +110,64 @@ local function expand_all(m, ctx, keep)
     return out, risky
 end
 
--- Every line of macro `m` expanded: the lines and whether any is risky (its Run asks twice, and /gmt macro won't
--- run it); or nil, why and the line it failed on (from 1). A risky command never takes its name from {who} or
--- {target}: the macro must spell it.
--- Under Acting on: Party (ctx.party: you, then your party), each member in turn gets the {who} lines, with its
--- name; a line without {who} goes once, with the first (so a toggle, !hide, isn't flipped back), and a command
--- that needs another player (!bring {who}) leaves you out.
+-- Every line of macro `m` expanded: lines, risky (one is: its Run asks twice, and /gmt macro won't run it), fans (it
+-- goes to more than one member of a party: its Run asks twice too); or nil, why and the line it failed on (from 1).
+-- A risky command never takes its name from {who} or {target}: the macro must spell it.
+-- Under Acting on: Party (ctx.party: you, then your party), the lines from its first {who} line to its last go for
+-- each member in turn, with their name in {who}; those of them without {who} go with the first member only, so a
+-- toggle (!hide) isn't flipped back. The lines before go once first, the lines after once last. A `notself`
+-- command (!bring {who}) leaves you out; a `one` (!goto {who}) can't go to a party: type the name.
 function macros.lines(m, ctx)
-    local out, risky
-    local fans = false
-    for _, l in ipairs(m.lines or {}) do if has_who(l) then fans = true end end
-    if ctx.mode == 'party' and fans then
-        if #(ctx.party or {}) == 0 then return nil, 'Acting on: Party has no one in it (log in)' end
-        out, risky = {}, false
-        local me = ctx.me and ctx.me:lower()
-        for k, n in ipairs(ctx.party) do
-            local one = {}
-            for key, v in pairs(ctx) do one[key] = v end
-            one.mode, one.name = 'name', n
-            local mine = me ~= nil and n:lower() == me
-            local lines, r, at = expand_all(m, one, function (l)
-                if not has_who(l) then return k == 1 end
-                return not (mine and build.needs_name(util.trim(l)))
-            end)
-            if not lines then return nil, ('%s (for %s)'):format(r, n), at end
-            risky = risky or r
-            for _, x in ipairs(lines) do out[#out + 1] = x end
-        end
-    else
-        local at
-        out, risky, at = expand_all(m, ctx)
-        if not out then return nil, risky, at end
+    local first, last
+    for i, l in ipairs(m.lines or {}) do
+        if has_who(l) then first, last = first or i, i end
     end
+    if ctx.mode ~= 'party' or not first then
+        local out, risky, at = expand_all(m, ctx)
+        if not out then return nil, risky, at end
+        if #out == 0 then return nil, 'no lines' end
+        return out, risky, false
+    end
+    for i = first, last do
+        local l = util.trim(m.lines[i])
+        if has_who(l) and build.flag(l, 'one') then
+            return nil, ('line %d: %s goes to one player: type the name, not {who}'):format(i, l:match('^!?%S+')), i
+        end
+    end
+    if #(ctx.party or {}) == 0 then return nil, 'Acting on: Party has no one in it (log in)' end
+    local me = ctx.me and ctx.me:lower()
+    local out, risky, members = {}, false, 0
+    local function run(c, keep, who)
+        local lines, r, at = expand_all(m, c, keep)
+        if not lines then return nil, who and ('%s (for %s)'):format(r, who) or r, at end
+        risky = risky or r
+        for _, x in ipairs(lines) do out[#out + 1] = x end
+        return #lines
+    end
+    local ok, why, at = run(ctx, function (i) return i < first end)
+    if not ok then return nil, why, at end
+    for k, n in ipairs(ctx.party) do
+        local one = {}
+        for key, v in pairs(ctx) do one[key] = v end
+        one.mode, one.name = 'name', n
+        local mine = me ~= nil and n:lower() == me
+        local got
+        got, why, at = run(one, function (i, l)
+            if i < first or i > last then return false end
+            if not has_who(l) then return k == 1 end
+            return not (mine and build.flag(util.trim(l), 'notself'))
+        end, n)
+        if not got then return nil, why, at end
+        local named = false
+        for i = first, last do
+            if has_who(m.lines[i]) and not (mine and build.flag(util.trim(m.lines[i]), 'notself')) then named = true end
+        end
+        if named then members = members + 1 end
+    end
+    ok, why, at = run(ctx, function (i) return i > last end)
+    if not ok then return nil, why, at end
     if #out == 0 then return nil, 'no lines' end
-    return out, risky
+    return out, risky, members > 1
 end
 
 -- The macro named `name` (any case) in `list`, and its index.

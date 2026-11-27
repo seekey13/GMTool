@@ -210,22 +210,19 @@ function build.line(c, values, ctx)
     return line, info
 end
 
--- Whether command `name` (a line's first word, '!' or not) needs another player named: a form of it has a player
--- box that never means you (who 'none': !goto, !bring, !send...).
-function build.needs_name(name)
+-- Whether a form of command `name` (a line's first word, '!' or not) has catalog flag `flag` ('one', 'notself').
+function build.flag(name, flag)
     name = (tostring(name or ''):match('^!?(%S+)') or ''):lower()
     for _, c in ipairs(require('core.catalog').list) do
-        if c.cmd == name then
-            for _, a in ipairs(c.args) do if a[2] == 'player' and a.who == 'none' then return true end end
-        end
+        if c.cmd == name and c[flag] then return true end
     end
     return false
 end
 
 --[[ The lines command `c` sends with `values`: build.line's one, or under Acting on: Party, a line apiece for each
-     of ctx.party when a player box is empty (you left out for a command that needs another player; one name the
-     same twice, once). A risky command never takes names from Party. Returns lines, info (info.names every name
-     in them), or nil and why. ]]--
+     of ctx.party when a player box is empty (you left out of a `notself` one, !bring; the same line twice, once).
+     A risky command never takes names from Party, nor a `one` (!goto). Returns lines, info (info.names every
+     name in them; info.cursor if any line reads the cursor), or nil and why. ]]--
 function build.lines(c, values, ctx)
     values, ctx = values or {}, ctx or {}
     local empty
@@ -240,24 +237,26 @@ function build.lines(c, values, ctx)
         return { l }, info
     end
     if c.danger then return fail('%s: type the name: a risky command never takes it from Acting on', empty[1]) end
+    if c.one then return fail('%s: type the name: !%s goes to one player, not a party', empty[1], c.cmd) end
     local me = ctx.me and ctx.me:lower()
-    local out, seen, info = {}, {}, { cursor = c.cursor ~= nil, names = {}, party = true }
+    local out, seen, info = {}, {}, { cursor = false, names = {}, party = true }
     for _, n in ipairs(ctx.party or {}) do
-        if not (empty.who == 'none' and me and n:lower() == me) then
+        if not (c.notself and me and n:lower() == me) then
             local one = {}
             for k, v in pairs(ctx) do one[k] = v end
             one.mode, one.name = 'name', n
             local l, why = build.line(c, values, one)
             if not l then return fail('for %s, %s', n, why) end
-            if not seen[l] then
-                seen[l] = true
+            if not seen[l:lower()] then
+                seen[l:lower()] = true
                 out[#out + 1] = l
                 info.names[#info.names + 1] = n
+                info.cursor = info.cursor or why.cursor
             end
         end
     end
     if #out == 0 then
-        return fail('%s: Acting on: Party has no one %s', empty[1], empty.who == 'none' and 'in it but you' or 'in it (log in)')
+        return fail('%s: Acting on: Party has no one %s', empty[1], c.notself and 'in it but you' or 'in it (log in)')
     end
     return out, info
 end

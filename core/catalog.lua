@@ -23,6 +23,11 @@
                'cursor_pc' (your cursor's player, else you), 'none' (a name is required)
       hint     the placeholder: what the server does with it empty
       adv      shown only when the command's form is expanded fully (augments and the like)
+
+    A command may also have:
+      danger   it removes or disrupts: its Send asks twice, and its player box takes only a name typed in it
+      one      Acting on: Party never sends it a line apiece (!goto: you go to one player)
+      notself  Acting on: Party leaves you out of it (!bring: you can't bring yourself)
 ]]--
 
 local catalog = {}
@@ -307,9 +312,9 @@ C{ cmd = 'updateconquest', page = 'nation', desc = 'Update every conquest guard 
 
 -- Travel ----------------------------------------------------------------------------------------------------------
 C{ cmd = 'zone', page = 'travel', desc = 'Go to a zone.', args = { pick('Zone', 'zones', { req = true }) } }
-C{ cmd = 'goto', page = 'travel', desc = 'Go to a player, in any zone.',
+C{ cmd = 'goto', page = 'travel', one = true, desc = 'Go to a player, in any zone.',
    args = { player('none'), choice('Zone in', ZONE_IN, { hint = 'yes' }) } }
-C{ cmd = 'bring', page = 'travel', desc = 'Bring a player to you.', args = { player('none'), choice('Zone in', ZONE_IN, { hint = 'yes' }) } }
+C{ cmd = 'bring', page = 'travel', notself = true, desc = 'Bring a player to you.', args = { player('none'), choice('Zone in', ZONE_IN, { hint = 'yes' }) } }
 C{ cmd = 'send', page = 'travel', desc = 'Send a player to another player, or to a zone.',
    args = { player('none'), word('To (player or zone id)', { req = true, target = 'name' }) } }
 C{ cmd = 'gotoname', page = 'travel', desc = 'Go to a mob or NPC by name in your zone.',

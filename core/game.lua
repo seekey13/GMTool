@@ -13,6 +13,7 @@ local game = {}
 
 local PC_FIRST, PC_LAST = 0x400, 0x6FF  -- players' entity indexes
 local MOB_FLAG = 0x10                   -- spawn flag of a mob
+local ENTITY_IDS = 0x1000000            -- a mob's, NPC's, pet's or trust's server id is this or more; a player's less
 
 -- The last 0x015 the client sent: { index = its target, x, y, z = your position as the server reads it }.
 game.heard = { index = nil, x = nil, y = nil, z = nil }
@@ -112,7 +113,8 @@ function game.probe()
     return game.heard.index, t and t.index or 0, t and t.sub or false
 end
 
--- The players near you, nearest first, and your party and alliance: { name, dist, party = true }, you left out.
+-- The players near you, nearest first, and your party and alliance: { name, dist, party = true }, you and trusts
+-- left out.
 function game.players()
     local m = mm()
     if not m then return {} end
@@ -123,7 +125,9 @@ function game.players()
         for i = 1, 17 do
             if p:GetMemberIsActive(i) == 1 then
                 local n = p:GetMemberName(i)
-                if n and n ~= '' and not seen[n] then
+                -- a trust holds a party slot too: its server id is a zone entity's (0x1000000 up), a player's isn't
+                local sid = tonumber(p:GetMemberServerId(i)) or 0
+                if n and n ~= '' and not seen[n] and sid < ENTITY_IDS then
                     seen[n] = true
                     list[#list + 1] = { name = n, dist = 0, party = true, zone = p:GetMemberZone(i) }
                 end

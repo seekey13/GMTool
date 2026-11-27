@@ -83,7 +83,7 @@ end)
 test('every page in each acting-on mode and with each target', function ()
     fresh()
     open_all()
-    for _, mode in ipairs({ 'me', 'target', 'name', 'none' }) do
+    for _, mode in ipairs({ 'me', 'target', 'name', 'party', 'none' }) do
         store.cfg.acting.mode = mode
         for _, t in ipairs({ PC, MOB, false }) do
             for _, id in ipairs(PAGES) do
@@ -592,8 +592,20 @@ test('acting on: Party sends a card\'s line for each member, all at once', funct
     frame()
     assert(fake.drew('2: Seekey, Ajido'), 'the strip names whom')
     frame({ ['##gm_send_hp'] = true })
+    eq(#calls.send + #calls.lines, 0, 'a line apiece asks twice')
+    frame({ ['##gm_send_hp'] = true })
     eq(#calls.send, 0, 'not one by one')
     eq(calls.lines[1].lines, { '!hp 99999 Seekey', '!hp 99999 Ajido' })
+    -- a preset to the party asks again too; Enter won't fan out
+    window.state.open.hp = true
+    frame({ ['##gm_pre_hp_2'] = true })
+    eq(#calls.lines, 0, 'Kill to the party: not at once')
+    eq(calls.toast[1].kind, 'warn')
+    frame({ ['##gm_pre_hp_2'] = true })
+    eq(calls.lines[1].lines, { '!hp 0 Seekey', '!hp 0 Ajido' })
+    window.state.enter = 'hp'
+    frame()
+    eq(#calls.lines + #calls.send, 0, 'Enter: press Send')
     -- a risky one still wants a name
     store.set_value('jail', 1, '')
     frame({ ['##gm_send_jail'] = true })
