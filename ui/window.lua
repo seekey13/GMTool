@@ -1285,13 +1285,23 @@ end
 -- The newest answer to `!geteffects <arg>` (a player's name, or a mob's server id) this session, as rows. For a
 -- player (`who`) each has Remove: !deleffect, then the list again, so it stays current.
 
--- The newest history entry for `line` (any case), or nil.
+-- The newest history entry for `line` (any case) that holds its answers: the newest one sent, unless it has none
+-- (yet, or another line sent within the moment took them) and an older one has. Or nil.
 local function listing(l)
     local low = l:lower()
+    local newest
     for _, e in ipairs(view.cfg.history or {}) do
-        if e.line:lower() == low then return e end
+        if e.line:lower() == low then
+            if replies.of(e) then return e end
+            newest = newest or e
+        end
     end
+    return newest
 end
+
+-- What Remove all leaves: effects that hold a battle's or an area's state, not a buff (by name, data/effects.lua).
+local KEEP = { KO = true, LEVEL_RESTRICTION = true, BATTLEFIELD = true, CONFRONTATION = true, LEVEL_SYNC = true,
+               BESIEGED = true, ALLIED_TAGS = true, VISITANT = true, ELVORSEAL = true }
 
 local function effects_panel(pg, arg, who)
     local list_line = '!geteffects ' .. arg
@@ -1305,13 +1315,19 @@ local function effects_panel(pg, arg, who)
     if kit.button('##gm_fx_list_' .. arg, x, hcy, label, 'ghost') then act.send(list_line, { cursor = false }) end
     kit.tip('Ask the server: ' .. list_line)
     if who and list and #list > 0 then
-        local lines = {}
-        for _, fx in ipairs(list) do lines[#lines + 1] = ('!deleffect %s %d'):format(who, fx.id) end
-        lines[#lines + 1] = list_line
-        if guarded('##gm_fx_all_' .. arg, x - S(6), hcy, 'Remove all', 'ghost', true, true) then
-            act.send_lines(lines, 'Remove all effects')
+        local lines, kept = {}, {}
+        for _, fx in ipairs(list) do
+            if KEEP[fx.name] then kept[#kept + 1] = util.pretty(fx.name)
+            else lines[#lines + 1] = ('!deleffect %s %d'):format(who, fx.id) end
         end
-        kit.tip(('Remove every effect from %s (food, buffs, and the rest), then list them again'):format(who))
+        if #lines > 0 then
+            lines[#lines + 1] = list_line
+            if guarded('##gm_fx_all_' .. arg, x - S(6), hcy, 'Remove all', 'ghost', true, true) then
+                act.send_lines(lines, 'Remove all effects')
+            end
+            kit.tip(('Remove every effect from %s (food, buffs, and the rest), then list them again.%s'):format(who,
+                #kept > 0 and ('\nKept, as they hold a battle\'s or area\'s state: ' .. table.concat(kept, ', ')) or ''))
+        end
     end
     if not said then
         local waiting = e and e.t and view.time and view.time - e.t <= 3
@@ -1342,7 +1358,8 @@ local function effects_panel(pg, arg, who)
                 if kit.button(('##gm_fx_del_%s_%d_%d'):format(arg, fx.n, fx.id), pg.right - rw, lcy, 'Remove', 'ghost') then
                     act.send_lines({ ('!deleffect %s %d'):format(who, fx.id), list_line }, 'Remove ' .. util.pretty(fx.name))
                 end
-                kit.tip(('!deleffect %s %d, then list them again'):format(who, fx.id))
+                kit.tip(('!deleffect %s %d, then list them again (of several with this id, the server removes the first)')
+                    :format(who, fx.id))
             end
             local ix = nx + S(160)
             kit.text_mid(d, ix, lcy, kit.fit(table.concat(bits, '  \194\183  '), right - ix, kit.fonts.text, S(SMALL)), P.dim,

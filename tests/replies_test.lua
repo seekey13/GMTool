@@ -87,3 +87,19 @@ test('a listing: its effects, none, or no listing at all', function ()
     eq(replies.effects({ 'Player Zeid not found. For mobs, target them...' }), nil, 'not a listing')
     eq(replies.effects(nil), nil)
 end)
+
+test('a long batch (typed lines, 1.6 s apart) keeps its last line\'s answers', function ()
+    replies.reset()
+    local entries = {}
+    for i = 1, 7 do
+        entries[i] = { line = 'l' .. i }
+        replies.sent(entries[i], (i - 1) * 1.6)  -- the seventh goes at 9.6 s, past 8 s from the first
+    end
+    for k = 1, 5 do assert(replies.text('[' .. k .. '] PROTECT (40)', 9.7 + k * 0.05), 'kept ' .. k) end
+    eq(#replies.of(entries[7]), 5)
+    replies.reset()
+end)
+
+test('an effect after a timestamp addon\'s prefix', function ()
+    eq(replies.effect('[12:00:00] [1] PROTECT (40) - Power: 50').id, 40)
+end)

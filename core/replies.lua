@@ -54,10 +54,10 @@ end
 -- A line went, its history entry `entry`: what comes next belongs to it, or to the batch it joins.
 function replies.sent(entry, now)
     if open and now <= open.ends then
-        open.owner = entry
+        open.owner, open.last = entry, now
         open.ends = math.max(open.ends, now + replies.WINDOW)
     else
-        open = { lines = {}, modes = {}, owner = entry, from = now, ends = now + replies.WINDOW }
+        open = { lines = {}, modes = {}, owner = entry, from = now, last = now, ends = now + replies.WINDOW }
     end
     by_entry[entry] = open
 end
@@ -71,7 +71,7 @@ function replies.text(msg, now, mode, injected)
     if #open.lines >= replies.MAX then return nil end
     open.lines[#open.lines + 1] = s
     open.modes[#open.lines] = mode
-    open.ends = math.min(math.max(open.ends, now + replies.STRETCH), open.from + replies.LONGEST)
+    open.ends = math.min(math.max(open.ends, now + replies.STRETCH), (open.last or open.from) + replies.LONGEST)
     return s
 end
 
@@ -87,7 +87,8 @@ end
 -- A status effect as !geteffects lists it ("[2] PROTECT (40) - Power: 50 | Time: 29m 50s | [Dispelable]"):
 -- { n, name, id, power, sub, time, tick, flags }, or nil.
 function replies.effect(s)
-    local n, name, id, rest = tostring(s):match('^%[(%d+)%] (.-) %((%d+)%)(.*)$')
+    s = tostring(s):gsub('^%[%d+:%d+:?%d*%]%s*', '')  -- a timestamp addon's
+    local n, name, id, rest = s:match('^%[(%d+)%] (.-) %((%d+)%)(.*)$')
     if not n then return nil end
     local e = { n = tonumber(n), name = name, id = tonumber(id) }
     rest = rest:gsub('^ %- ', '')

@@ -753,3 +753,27 @@ test('zone browser: a row opens to its ids and drops; Add puts one in your inven
     drops.reset()
     window.state.zb = nil
 end)
+
+test('status effects: an older listing still shows when a later send took the answers; Remove all keeps battle state', function ()
+    fresh()
+    local replies = require('core.replies')
+    replies.reset()
+    window.state.page, window.state.pl = 'players', { name = { 'Trion' } }
+    store.remember('!geteffects Trion', 990)
+    replies.sent(store.cfg.history[1], 0)
+    replies.text('[1] PROTECT (40) - Power: 50', 0.1)
+    replies.text('[2] LEVEL_RESTRICTION (143) - Power: 30', 0.15)
+    -- listed again, but a !where right after took the answers
+    store.remember('!where', 994)
+    store.remember('!geteffects Trion', 995)
+    replies.sent(store.cfg.history[1], 10)
+    replies.sent({ line = '!where' }, 10.2)
+    replies.text('Seekey is at ...', 10.3)
+    frame(nil, { target = false })
+    assert(fake.drew('Protect'), 'the older listing')
+    frame({ ['##gm_fx_all_Trion'] = true }, { target = false })
+    frame({ ['##gm_fx_all_Trion'] = true }, { target = false })
+    eq(calls.lines[1].lines, { '!deleffect Trion 40', '!geteffects Trion' }, 'the level cap stays')
+    replies.reset()
+    window.state.pl = nil
+end)
