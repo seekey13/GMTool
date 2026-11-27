@@ -122,7 +122,8 @@ local function view(now)
     if now - players_at > 1 then
         players, players_at = game.players(), now
     end
-    if window.state.page == 'nearby' and now - entities_at > 1 then
+    local page = window.state.page
+    if (page == 'nearby' or page == 'zones') and store.cfg.ui.open and now - entities_at > 1 then
         entities, entities_at = game.entities(150), now
     end
     local t = game.target()
@@ -186,7 +187,7 @@ end
 local HELP = {
     '/gmt  open or close GM Tool (/gmtool too)',
     '/gmt <command> [args]  send a GM command through GM Tool: /gmt hp 100 Kupipi, /gmt !where',
-    '/gmt page <name>  open a page: favorites, player, travel, items, console, history, settings...',
+    '/gmt page <name>  open a page: favorites, target, nearby, zones, player, travel, items, macros, history...',
     '/gmt find <words>  open the window searching for commands',
     '/gmt macro <name>  run a macro (Macros page)',
     '/gmt place <name> [player]  put yourself, or a player, at a saved place (Places page)',
@@ -200,10 +201,17 @@ local function page_named(s)
     s = s:lower()
     local pages = { 'favorites', 'console', 'history', 'settings' }
     for _, p in ipairs(catalog.PAGES) do pages[#pages + 1] = p[1] end
-    for _, id in ipairs(pages) do
+    for _, id in ipairs({ 'target', 'nearby', 'zones', 'macros', 'places' }) do pages[#pages + 1] = id end
+    local TITLES = { zones = 'zone browser' }
+    local function title(id)
         local p = catalog.page_of[id]
-        local title = p and p.title:lower() or id
-        if id == s or title == s or id:sub(1, #s) == s or title:sub(1, #s) == s then return id end
+        return p and p.title:lower() or TITLES[id] or id
+    end
+    for _, id in ipairs(pages) do  -- a whole name first, then the first a prefix fits
+        if id == s or title(id) == s then return id end
+    end
+    for _, id in ipairs(pages) do
+        if id:sub(1, #s) == s or title(id):sub(1, #s) == s then return id end
     end
 end
 

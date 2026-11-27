@@ -22,6 +22,7 @@ local data = require('core.data')
 local kit = require('ui.kit')
 local macros = require('core.macros')
 local replies = require('core.replies')
+local spawns = require('core.spawns')
 local store = require('core.store')
 local util = require('core.util')
 
@@ -1103,6 +1104,16 @@ end
 
 local KIND = { pc = { 'PLAYER', P.teal }, mob = { 'MOB', P.rose }, npc = { 'NPC', P.amber }, other = { 'PET / TRUST', P.accent } }
 
+-- Job ids to their names (WAR, MNK...), for what the database says of a mob.
+local job_names
+local function jobs()
+    if not job_names then
+        job_names = {}
+        for _, j in ipairs(data.raw('jobs') or {}) do job_names[j[1]] = j[2] end
+    end
+    return job_names
+end
+
 local function target_page(pg)
     local t = view.target
     if not t then
@@ -1110,10 +1121,23 @@ local function target_page(pg)
         return
     end
     local d = pg.dl
-    local y, h = pg.y, S(58)
+    -- what the server's database says of a mob or NPC (core/spawns.lua)
+    local known = t.kind ~= 'pc' and t.sid and spawns.find(t.sid)
+    local y, h = pg.y, S(known and 76 or 58)
     local bx, bw = pg.lx - S(8), pg.right - pg.lx + S(16)
     kit.fill(d, bx, y, bw, h, P.well, S(5), 0.7)
     kit.outline(d, bx, y, bw, h, P.line, S(5))
+    if known then
+        local desc = spawns.describe(known, jobs())
+        table.remove(desc)  -- its ids: the line above has it
+        table.remove(desc, 1)  -- its name: the title has it
+        local tags = spawns.tags(known)
+        if #tags > 0 then table.insert(desc, 1, table.concat(tags, ', ')) end
+        local s = #desc > 0 and table.concat(desc, '  \194\183  ') or 'In the server\'s database.'
+        kit.text_mid(d, pg.lx, y + S(60), kit.fit(s, bw - S(16), kit.fonts.text, S(SMALL)), known.nm and P.amber or P.text2,
+            kit.fonts.text, S(SMALL))
+        if kit.over(bx, y + S(50), bw, S(20)) then kit.tooltip(table.concat(spawns.describe(known, jobs()), '\n')) end
+    end
     local name_px = S(BODY + 2)
     local tw = kit.measure(t.name, kit.fonts.semi, name_px)
     kit.text_mid(d, pg.lx, y + S(19), kit.fit(t.name, S(260), kit.fonts.semi, name_px), P.white, kit.fonts.semi, name_px)
@@ -1239,6 +1263,175 @@ local function nearby_page(pg)
                 kit.tip(('%s (%s): %s'):format(b[3], e.name, b[2]))
                 if pressed then act.send(b[2], { cursor = false }) end
                 x = x - (w or kit.button_width(b[1])) - S(6)
+            end
+        end
+    end
+end
+
+-- Zone Browser ------------------------------------------------------------------------------------------------
+-- Every mob and NPC of a zone, from the server's database (core/spawns.lua): a row per mob group or NPC name; one
+-- with several ids opens to a row per id. Bring only in your own zone (the server moves a mob only into it).
+
+local ZB_KINDS = { { 'all', 'All' }, { 'nm', 'NMs' }, { 'mob', 'Mobs' }, { 'npc', 'NPCs' } }
+local ZONES = { set = 'zones' }
+
+-- How wide an id's buttons are (unarmed).
+local function zb_buttons_width(e, here)
+    local w = 0
+    for _, b in ipairs(spawns.buttons(e, 0, here)) do w = w + kit.button_width(b[1]) + S(6) end
+    return w
+end
+
+-- Id `id`'s buttons, right to left from `x`.
+local function zb_buttons(e, id, here, x, cy)
+    local list = spawns.buttons(e, id, here)
+    for j = #list, 1, -1 do
+        local b = list[j]
+        local bid = ('##gm_zb_%d_%s'):format(id, b[1])
+        local pressed, w
+        if b[4] then
+            pressed, w = guarded(bid, x, cy, b[1], 'ghost', true, true)
+        else
+            w = kit.button_width(b[1])
+            pressed = kit.button(bid, x - w, cy, b[1], j == 1 and 'accent' or 'ghost')
+        end
+        kit.tip(('%s (%s, %d): %s'):format(b[3], e.name, id, b[2]))
+        if pressed then act.send(b[2], { cursor = false }) end
+        x = x - (w or kit.button_width(b[1])) - S(6)
+    end
+end
+
+local function copy_id(id, name)
+    imgui.SetClipboardText(tostring(id))
+    act.toast(('Copied %d (%s).'):format(id, name))
+end
+
+-- A row's words after the name: its tags (NM in amber), levels, and count or id. Returns the x after them.
+local function zb_info(d, x, cy, room, e, nup)
+    local px = S(SMALL)
+    local tags = spawns.tags(e)
+    if e.nm and room > S(30) then
+        kit.text_mid(d, x, cy, 'NM', P.amber, kit.fonts.semi, px)
+        local w = kit.measure('NM', kit.fonts.semi, px) + S(8)
+        x, room = x + w, room - w
+        table.remove(tags, 1)
+    end
+    local bits = {}
+    for _, t in ipairs(tags) do bits[#bits + 1] = t end
+    if spawns.levels(e) ~= '' then bits[#bits + 1] = spawns.levels(e) end
+    bits[#bits + 1] = #e.ids > 1 and ('\195\151' .. #e.ids) or tostring(e.ids[1])
+    if nup > 0 then bits[#bits + 1] = #e.ids > 1 and (nup .. ' up near you') or 'up near you' end
+    if room > S(20) then
+        kit.text_mid(d, x, cy, kit.fit(table.concat(bits, '  \194\183  '), room, kit.fonts.text, px), nup > 0 and P.teal or P.dim,
+            kit.fonts.text, px)
+    end
+end
+
+local function zones_page(pg)
+    state.zb = state.zb or { kind = 1, q = { '' }, open = {} }
+    local zb = state.zb
+    local mine = view.me and view.me.zone
+    local zone = zb.zone or mine
+    local here = zone ~= nil and zone == mine
+    -- the zone, and which kind
+    local cy = pg.y + S(15)
+    pg.y = pg.y + S(34)
+    local labels, ids = {}, {}
+    for j, k in ipairs(ZB_KINDS) do labels[j], ids[j] = k[2], '##gm_zb_kind_' .. k[1] end
+    local px = S(BODY - 2)
+    local sw = kit.segments_width(labels, px)
+    local picked, changed = kit.segments(ids, pg.right - sw, cy, labels, zb.kind, true, 1, px)
+    if changed then zb.kind = picked end
+    local away = zb.zone ~= nil and mine ~= nil and zb.zone ~= mine
+    local mine_w = kit.button_width('Mine')
+    local zw = pg.right - sw - S(10) - pg.lx - (away and (mine_w + S(6)) or 0)
+    local ze = zone and data.find(ZONES, tostring(zone))
+    local shown = ze and ze.label or (zone and ('Zone ' .. zone)) or '(pick a zone)'
+    kit.dropdown('##gm_zb_zone', pg.lx, cy, zw, shown, true, 1, function ()
+        local q = filter_box('##gm_zb_zone', math.max(zw, S(360)) - S(20))
+        pick_list('##gm_zb_zone', data.filter(data.list(ZONES), q, 300), ze, function (e)
+            zb.zone = e.id ~= mine and e.id or nil
+            zb.open = {}
+        end, S(240))
+    end)
+    if away then
+        if kit.button('##gm_zb_mine', pg.lx + zw + S(6), cy, 'Mine', 'ghost') then zb.zone, zb.open = nil, {} end
+        kit.tip('Back to the zone you are in')
+    end
+    -- the filter
+    cy = pg.y + S(13)
+    pg.y = pg.y + S(32)
+    kit.input('##gm_zb_q', pg.lx, cy, pg.right - pg.lx, zb.q, 40, 'filter by name, server id or index')
+    if not zone then
+        note(pg, 'Pick a zone: every mob and NPC in it, from the server\'s database.', P.text2)
+        return
+    end
+    local all = spawns.zone(zone)
+    if #all == 0 then
+        note(pg, 'The server\'s database has no mobs or NPCs in this zone.', P.dim)
+        return
+    end
+    local list = spawns.filter(all, ZB_KINDS[zb.kind][1], util.trim(zb.q[1]))
+    local c = spawns.counts(all)
+    local function plural(n, s) return ('%d %s%s'):format(n, s, n == 1 and '' or 's') end
+    note(pg, ('%s, %s and %s in the server\'s database.%s'):format(plural(c.nm, 'NM'), plural(c.mob, 'mob'),
+        plural(c.npc, 'NPC'), here and '' or ' Go to zones you there; Bring is for your own zone.'), P.dim)
+    if #list == 0 then
+        note(pg, 'Nothing in this zone matches.', P.dim)
+        return
+    end
+    -- what's up near you (your zone only: what the client draws)
+    local up = {}
+    if here then for _, x in ipairs(view.entities or {}) do if x.sid then up[x.sid] = true end end end
+    local d = pg.dl
+    local function visible(y) return y < pg.bottom and y + S(ROW_H) > pg.top end
+    for _, e in ipairs(list) do
+        local y = pg.y
+        local lcy = line(pg, nil)
+        local single = #e.ids == 1
+        local open = not single and zb.open[e.key]
+        if visible(y) then
+            local nup = 0
+            for _, id in ipairs(e.ids) do if up[id] then nup = nup + 1 end end
+            kit.circle(d, pg.lx + S(3), lcy, S(3.5), e.kind == 'npc' and P.amber or P.rose)
+            if nup > 0 then kit.ring(d, pg.lx + S(3), lcy, S(6), P.teal) end
+            local right = single and (pg.right - zb_buttons_width(e, here)) or (pg.right - S(20))
+            local nx = pg.lx + S(14)
+            local room = right - nx - S(8)
+            local name_px = S(BODY - 1)
+            local name = kit.fit(e.name, room * 0.62, kit.fonts.text, name_px)
+            kit.text_mid(d, nx, lcy, name, P.white, kit.fonts.text, name_px)
+            local nw = kit.measure(name, kit.fonts.text, name_px) + S(10)
+            zb_info(d, nx + nw, lcy, room - nw, e, nup)
+            local hovered, clicked = kit.hit('##gm_zb_row_' .. e.key, nx - S(2), y + S(3), room + S(6), S(ROW_H) - S(6))
+            if hovered then
+                kit.tooltip(table.concat(spawns.describe(e, jobs()), '\n') .. (single and '\nClick to copy the id.'
+                    or '\nClick to list each id.'))
+            end
+            if clicked then
+                if single then copy_id(e.ids[1], e.name) else zb.open[e.key] = not open or nil end
+            end
+            if single then
+                zb_buttons(e, e.ids[1], here, pg.right, lcy)
+            else
+                kit.icon(d, open and 'down' or 'right', pg.right - S(8), lcy, S(11), hovered and P.text or P.dim)
+            end
+        end
+        if open then
+            for _, id in ipairs(e.ids) do
+                local sy = pg.y
+                local scy = line(pg, nil)
+                if visible(sy) then
+                    local ix = pg.lx + S(28)
+                    if up[id] then kit.circle(d, ix - S(8), scy, S(3), P.teal) end
+                    local s = ('%d  \194\183  index %d%s'):format(id, id - spawns.id(e.zone, 0), up[id] and '  \194\183  up near you' or '')
+                    local tw = kit.measure(s, kit.fonts.text, S(SMALL))
+                    local hovered, clicked = kit.hit(('##gm_zb_id_%d'):format(id), ix - S(2), sy + S(4), tw + S(4), S(ROW_H) - S(8))
+                    kit.text_mid(d, ix, scy, s, hovered and P.accent2 or (up[id] and P.teal or P.text2), kit.fonts.text, S(SMALL))
+                    kit.tip('Click to copy the id')
+                    if clicked then copy_id(id, e.name) end
+                    zb_buttons(e, id, here, pg.right, scy)
+                end
             end
         end
     end
@@ -1373,6 +1566,7 @@ local function sidebar(x, y, w, h)
             ny = ny + nav_item('favorites', 'Favorites', cx, ny, w, #view.cfg.favorites > 0 and #view.cfg.favorites or nil)
             ny = ny + nav_item('target', 'Target', cx, ny, w)
             ny = ny + nav_item('nearby', 'Nearby', cx, ny, w)
+            ny = ny + nav_item('zones', 'Zone Browser', cx, ny, w)
             for _, p in ipairs(catalog.PAGES) do
                 if p[1] ~= 'server' or view.cfg.ui.show_server then
                     ny = ny + nav_item(p[1], p[2], cx, ny, w, #catalog.page_of[p[1]].commands)
@@ -1399,8 +1593,8 @@ local function close_mark(id, cx, cy, box)
     return clicked
 end
 
-local TITLES = { favorites = 'Favorites', target = 'Target', nearby = 'Nearby',console = 'Console', history = 'History', settings = 'Settings', search = 'Search',
-                 macros = 'Macros', places = 'Places' }
+local TITLES = { favorites = 'Favorites', target = 'Target', nearby = 'Nearby', zones = 'Zone Browser', console = 'Console',
+                 history = 'History', settings = 'Settings', search = 'Search', macros = 'Macros', places = 'Places' }
 
 local function page_title(id)
     if TITLES[id] then return TITLES[id] end
@@ -1444,6 +1638,7 @@ local function page(x, y, w, h)
             if id == 'favorites' then favorites_page(pg)
             elseif id == 'target' then target_page(pg)
             elseif id == 'nearby' then nearby_page(pg)
+            elseif id == 'zones' then zones_page(pg)
             elseif id == 'search' then search_page(pg)
             elseif id == 'console' then console_page(pg)
             elseif id == 'history' then history_page(pg)

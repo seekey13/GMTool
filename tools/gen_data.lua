@@ -12,6 +12,8 @@
       scripts/globals/quests.lua  -> data/quests.lua     quest ids per quest log
       scripts/globals/missions.lua-> data/missions.lua   mission ids per mission log
       sql/char_points.sql         -> data/currencies.lua the currency names !addcurrency takes
+      sql/mob_spawn_points.sql, mob_groups.sql, mob_pools.sql, mob_family_system.sql, npc_list.sql
+                                  -> data/spawns.lua     every mob and NPC of each zone, by name, with its ids
 ]]--
 
 local root = (arg and arg[1]) or '../../../../../catseyexi'
@@ -212,4 +214,168 @@ do
     lines[#lines + 1] = '}\n'
     write('currencies', ('%d currency names !addcurrency and !delcurrency take (char_points columns)'):format(#names),
         table.concat(lines, '\n'))
+end
+
+-- Mobs and NPCs -----------------------------------------------------------------------------------------------------
+
+-- The values of one `INSERT INTO ... VALUES (...);` line, by column: numbers as numbers, strings unquoted (\' and ''
+-- read as '), NULL as nil. Nil for any other line.
+local function sql_row(line)
+    local body = line:match('^INSERT INTO [^(]*VALUES%s*%((.*)%)%s*;')
+    if not body then return nil end
+    local out, n, i, len = {}, 0, 1, #body
+    while i <= len do
+        local c = body:sub(i, i)
+        if c == ' ' then
+            i = i + 1
+        elseif c == '\'' then
+            local j, parts = i + 1, {}
+            while j <= len do
+                local ch = body:sub(j, j)
+                if ch == '\\' then
+                    parts[#parts + 1] = body:sub(j + 1, j + 1)
+                    j = j + 2
+                elseif ch == '\'' then
+                    if body:sub(j + 1, j + 1) ~= '\'' then break end
+                    parts[#parts + 1] = '\''
+                    j = j + 2
+                else
+                    parts[#parts + 1] = ch
+                    j = j + 1
+                end
+            end
+            n = n + 1
+            out[n] = table.concat(parts)
+            local comma = body:find(',', j + 1, true)
+            i = comma and comma + 1 or len + 1
+        else
+            local comma = body:find(',', i, true) or (len + 1)
+            local tok = body:sub(i, comma - 1):match('^%s*(.-)%s*$')
+            n = n + 1
+            if tok ~= 'NULL' then out[n] = tonumber(tok) or tok end
+            i = comma + 1
+        end
+    end
+    out.n = n
+    return out
+end
+
+local function sql_rows(path, fn)
+    for line in must(path):gmatch('[^\r\n]+') do
+        local r = sql_row(line)
+        if r then fn(r) end
+    end
+end
+
+-- An entity's zone and its index in the zone, from its server id (0x1000000 + zone * 4096 + index).
+local function zone_index(id)
+    local z = math.floor((id - 0x1000000) / 4096)
+    return z, id - 0x1000000 - z * 4096
+end
+
+-- '1-3,7,9-10' for sorted indexes { 1, 2, 3, 7, 9, 10 }.
+local function ranges(idx)
+    table.sort(idx)
+    local out, a, b = {}, idx[1], idx[1]
+    local function flush() out[#out + 1] = a == b and tostring(a) or (a .. '-' .. b) end
+    for k = 2, #idx do
+        if idx[k] == b + 1 then b = idx[k] else flush() a, b = idx[k], idx[k] end
+    end
+    flush()
+    return table.concat(out, ',')
+end
+
+-- The name the client shows (polutils_name), else the server's with spaces for underscores.
+local function shown_name(shown, name)
+    shown = type(shown) == 'string' and shown:match('^%s*(.-)%s*$') or ''
+    if shown ~= '' then return shown end
+    return (tostring(name or ''):gsub('_', ' '):match('^%s*(.-)%s*$'))
+end
+
+do
+    local sql = root .. '/sql/'
+    local families = {}
+    sql_rows(sql .. 'mob_family_system.sql', function (r) families[r[1]] = r[2] end)
+    local pools = {}  -- [poolid] = { mobType, familyid, mJob }
+    sql_rows(sql .. 'mob_pools.sql', function (r) pools[r[1]] = { type = r[15] or 0, family = r[4] or 0, job = r[6] or 0 } end)
+    local groups = {}  -- [zone][groupid] = { pool, respawn, spawntype, minLv, maxLv }
+    sql_rows(sql .. 'mob_groups.sql', function (r)
+        local z = r[3]
+        groups[z] = groups[z] or {}
+        groups[z][r[1]] = { pool = r[2], respawn = r[5] or 0, spawntype = r[6] or 0, lo = r[10] or 0, hi = r[11] or 0 }
+    end)
+    local zones, seen = {}, {}  -- [zone] = { [key] = { line fields..., idx = {} } }
+    local count = { mobs = 0, npcs = 0 }
+    local function add(z, key, make, index)
+        zones[z] = zones[z] or {}
+        local e = zones[z][key]
+        if not e then
+            e = make()
+            e.idx = {}
+            zones[z][key] = e
+        end
+        e.idx[#e.idx + 1] = index
+    end
+    sql_rows(sql .. 'mob_spawn_points.sql', function (r)
+        local id = r[1]
+        if seen[id] then return end
+        seen[id] = true
+        local z, index = zone_index(id)
+        local name = shown_name(r[4], r[3])
+        if name == '' then return end
+        local g = groups[z] and groups[z][r[5]] or {}
+        local p = pools[g.pool] or {}
+        count.mobs = count.mobs + 1
+        add(z, 'm|' .. (r[5] or 0) .. '|' .. name, function ()
+            return { 'm', name, g.lo or 0, g.hi or 0, p.type or 0, g.respawn or 0, g.spawntype or 0, p.family or 0, p.job or 0 }
+        end, index)
+    end)
+    sql_rows(sql .. 'npc_list.sql', function (r)
+        local id = r[1]
+        local name = shown_name(r[3], r[2])
+        -- placeholders the client never names, and invisible helpers
+        if name == '' or name == 'NPC' or not name:find('%S') then return end
+        local z, index = zone_index(id)
+        if z < 0 or z > 1023 then return end
+        count.npcs = count.npcs + 1
+        local status = r[14] or 0
+        add(z, 'n|' .. status .. '|' .. name, function () return { 'n', name, status } end, index)
+    end)
+    local used = {}
+    local zone_ids = {}
+    for z in pairs(zones) do zone_ids[#zone_ids + 1] = z end
+    table.sort(zone_ids)
+    local lines = { 'return {', 'zones = {' }
+    for _, z in ipairs(zone_ids) do
+        local list = {}
+        for _, e in pairs(zones[z]) do
+            table.sort(e.idx)
+            e.first = e.idx[1]
+            list[#list + 1] = e
+            if e[1] == 'm' and e[8] ~= 0 then used[e[8]] = true end
+        end
+        table.sort(list, function (a, b) return a.first < b.first end)
+        local rows = {}
+        for _, e in ipairs(list) do
+            local f = {}
+            for k = 1, #e do f[k] = tostring(e[k]) end
+            f[#f + 1] = ranges(e.idx)
+            rows[#rows + 1] = table.concat(f, '|')
+        end
+        lines[#lines + 1] = ('[%d]=%s,'):format(z, lit(table.concat(rows, '\n')))
+    end
+    lines[#lines + 1] = '},'
+    lines[#lines + 1] = 'families = {'
+    local fam_ids = {}
+    for f in pairs(used) do fam_ids[#fam_ids + 1] = f end
+    table.sort(fam_ids)
+    for _, f in ipairs(fam_ids) do
+        if families[f] then lines[#lines + 1] = ('[%d]=%s,'):format(f, lit(families[f])) end
+    end
+    lines[#lines + 1] = '},'
+    lines[#lines + 1] = '}\n'
+    write('spawns', ('Every mob (%d) and NPC (%d) of %d zones, from the server\'s sql: per zone, a line per mob group or NPC '
+        .. 'name.\n-- A mob: m|name|min level|max level|mob type|respawn s|spawn type|family|main job|indexes. An NPC: '
+        .. 'n|name|status|indexes.\n-- An index is the id less 0x1000000 + zone * 4096; indexes are ranges, 1-3,7.')
+        :format(count.mobs, count.npcs, #zone_ids), table.concat(lines, '\n'))
 end

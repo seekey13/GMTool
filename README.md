@@ -29,6 +29,7 @@ GM Tool puts a form and a button on each of the server's 199 GM commands. It rea
 - **History:** the last 100 lines sent, with Send again and Edit. Under each line sent this session is what the server said back (`!getid`'s id, `!geteffects`' list...), caught from the chat in the moment after it went (addons' lines and anything shaped like a player's chat are left out; lines sent together share their answers). **Copy** puts an answer on the clipboard, and a `!pos` answer (yours or another player's) can be **saved as a place**. The newest answer also shows in the window's status line.
 - **Target:** one-click actions that fit what you target. For a player: Go to, Bring, Restore, Raise, Effects, Jail... For a mob: Kill, 1 HP, Level 1, Despawn, Bring here, Stats, Enmity... NPCs and pets get their own. Lines name the target, or give its server id, wherever the server takes one.
 - **Nearby:** every player, mob and NPC around you, nearest first, with its server id (a click copies it), distance, Go to, and Bring and Despawn (which ask twice). Filter it by kind and name. The order holds still while your pointer is over the list, so a row never moves under a click.
+- **Zone Browser:** every mob and NPC of any zone, from the server's own database rather than what you can see: NMs (with their levels, family, and how they spawn: lottery, scripted, at night...), mobs grouped by name with each id, and NPCs, hidden ones too. Filter by name, server id or index. **Spawn**, **Go to** (zoning you there from another zone), **Despawn**, and in your own zone **Bring**; the ones up near you are marked. Targeting a mob or NPC shows the same facts on the Target page.
 - **Macros:** named runs of lines with placeholders: `{who}` (whoever Acting on means), `{me}`, `{target}`, `{tid}` (your target's server id), `{x} {y} {z} {zone}` (where you stand). A run checks every line first and sends none if any fails. A risky command in a macro (`!jail`, `!promote`...) must spell its name: it never takes it from `{who}` or `{target}`. A macro holding one asks twice to run, and `/gmt macro` won't run it. A bare `!hp` in a macro acts only on a targeted mob, never a player. It starts you with Restore, Revive here, Bring and restore, Go incognito and Punching bag.
 - **Places:** save where you stand and `!pos` yourself, or whoever Acting on means, back there with one click. The position comes from your own position packet, so it is exactly what the server has. A place in the zone the player is already in is reached without zoning (no loading screen, trusts kept).
 - **Safety:** commands that delete or disrupt (jail, delete inventory, crash, provoke all...) ask for a second click. The server-wide page stays hidden until you turn it on.
@@ -49,7 +50,7 @@ GM Tool puts a form and a button on each of the server's 199 GM commands. It rea
 | --- | --- |
 | `/gmt` (or `/gmtool`) | Open or close GM Tool |
 | `/gmt <command> [args]` | Send a GM command through GM Tool's queue: `/gmt hp 100 Kupipi`, `/gmt !where` |
-| `/gmt page <name>` | Open a page: `favorites`, `player`, `travel`, `items`, `console`, `history`, `settings`... |
+| `/gmt page <name>` | Open a page: `favorites`, `target`, `nearby`, `zones`, `player`, `travel`, `items`, `macros`, `history`, `settings`... |
 | `/gmt find <words>` | Open the window searching for commands |
 | `/gmt macro <name>` | Run a macro |
 | `/gmt place <name> [player]` | Put yourself, or a player, at a saved place |
@@ -80,7 +81,7 @@ luajit tools/gen_data.lua [path to the server]   # regenerate data/ from the ser
 luajit tools/gen_docs.lua   # regenerate docs/commands.md
 ```
 
-`data/` is generated from the server checkout and committed, so the addon needs no server source to run. When the server gains or changes a command, regenerate it: `tests/catalog_test.lua` then fails on any command without a form, or any form whose arguments don't fit the server's parameters.
+`data/` is generated from the server checkout and committed, so the addon needs no server source to run. `data/spawns.lua` (the Zone Browser's mobs and NPCs) comes from the server's `sql/` tables: `mob_spawn_points`, `mob_groups`, `mob_pools`, `mob_family_system` and `npc_list`. When the server gains or changes a command, regenerate it: `tests/catalog_test.lua` then fails on any command without a form, or any form whose arguments don't fit the server's parameters.
 
 ## License
 
