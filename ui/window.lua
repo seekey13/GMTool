@@ -1167,7 +1167,7 @@ local function target_page(pg)
     end
     local d = pg.dl
     -- what the server's database says of a mob or NPC (core/spawns.lua)
-    local known = t.kind ~= 'pc' and t.sid and spawns.find(t.sid)
+    local known = t.kind ~= 'pc' and t.sid and spawns.find(t.sid, t.kind)
     local y, h = pg.y, S(known and 76 or 58)
     local bx, bw = pg.lx - S(8), pg.right - pg.lx + S(16)
     kit.fill(d, bx, y, bw, h, P.well, S(5), 0.7)
@@ -1332,7 +1332,7 @@ local function zb_buttons(e, id, here, x, cy)
     local list = spawns.buttons(e, id, here)
     for j = #list, 1, -1 do
         local b = list[j]
-        local bid = ('##gm_zb_%d_%s'):format(id, b[1])
+        local bid = ('##gm_zb_%s_%d_%s'):format(e.key, id, b[1])  -- a few ids are a mob and an NPC: by row too
         local pressed, w
         if b[4] then
             pressed, w = guarded(bid, x, cy, b[1], 'ghost', true, true)
@@ -1471,7 +1471,7 @@ local function zones_page(pg)
                     if up[id] then kit.circle(d, ix - S(8), scy, S(3), P.teal) end
                     local s = ('%d  \194\183  index %d%s'):format(id, id - spawns.id(e.zone, 0), up[id] and '  \194\183  up near you' or '')
                     local tw = kit.measure(s, kit.fonts.text, S(SMALL))
-                    local hovered, clicked = kit.hit(('##gm_zb_id_%d'):format(id), ix - S(2), sy + S(4), tw + S(4), S(ROW_H) - S(8))
+                    local hovered, clicked = kit.hit(('##gm_zb_id_%s_%d'):format(e.key, id), ix - S(2), sy + S(4), tw + S(4), S(ROW_H) - S(8))
                     kit.text_mid(d, ix, scy, s, hovered and P.accent2 or (up[id] and P.teal or P.text2), kit.fonts.text, S(SMALL))
                     kit.tip('Click to copy the id')
                     if clicked then copy_id(id, e.name) end

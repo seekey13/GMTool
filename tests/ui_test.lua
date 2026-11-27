@@ -525,7 +525,7 @@ test('zone browser: rows from the database, spawn, bring twice, a group opens to
     local real = spawns.source
     local base = spawns.id(230, 0)
     spawns.source = function ()
-        return { zones = { [230] = 'm|Crab|1|3|0|300|0|1|1|10-12\nm|Leaping Lizzy|10|11|2|0|32|1|1|20\nn|Door|0|30',
+        return { zones = { [230] = 'm|Crab|1|3|0|300|0|1|1|10-12\nm|Leaping Lizzy|10|11|2|0|32|1|1|20\nn|Door|0|30\nm|Cursed Chest|1|1|0|0|0|1|1|40\nn|Cursed Chest|0|40',
                            [107] = 'm|Bubbly Bernie|9|10|2|0|128|1|1|5' }, families = { [1] = 'Crab' } }
     end
     spawns.reset()
@@ -535,12 +535,12 @@ test('zone browser: rows from the database, spawn, bring twice, a group opens to
     local f = frame(nil, { entities = { { index = 20, name = 'Leaping Lizzy', kind = 'mob', sid = lizzy, hpp = 100, dist = 5 } } })
     assert(fake.drew('Leaping Lizzy') and fake.drew('Crab') and fake.drew('Door'), 'every row')
     assert(f, 'drew')
-    frame({ ['##gm_zb_' .. lizzy .. '_Spawn'] = true })
+    frame({ ['##gm_zb_230:2_' .. lizzy .. '_Spawn'] = true })
     eq(calls.send[1].line, '!spawnmob ' .. lizzy, 'spawn at once')
     eq(calls.send[1].info.cursor, false, 'by id, not the cursor')
-    frame({ ['##gm_zb_' .. lizzy .. '_Bring'] = true })
+    frame({ ['##gm_zb_230:2_' .. lizzy .. '_Bring'] = true })
     eq(#calls.send, 0, 'bring asks twice')
-    frame({ ['##gm_zb_' .. lizzy .. '_Bring'] = true })
+    frame({ ['##gm_zb_230:2_' .. lizzy .. '_Bring'] = true })
     eq(calls.send[1].line, '!mobhere ' .. lizzy)
     -- a group of three opens to a row per id
     frame()
@@ -548,7 +548,7 @@ test('zone browser: rows from the database, spawn, bring twice, a group opens to
     frame({ ['##gm_zb_row_230:1'] = true })
     frame()
     assert(fake.drew(tostring(crab) .. '  \194\183  index 10'), 'its ids listed')
-    frame({ ['##gm_zb_' .. (crab + 1) .. '_Spawn'] = true })
+    frame({ ['##gm_zb_230:1_' .. (crab + 1) .. '_Spawn'] = true })
     eq(calls.send[1].line, '!spawnmob ' .. (crab + 1))
     -- NMs only
     frame({ ['##gm_zb_kind_nm'] = true })
@@ -558,7 +558,7 @@ test('zone browser: rows from the database, spawn, bring twice, a group opens to
     window.state.zb.zone, window.state.zb.kind = 107, 1
     frame()
     assert(fake.drew('Bubbly Bernie'), 'the other zone')
-    frame({ ['##gm_zb_' .. spawns.id(107, 5) .. '_Bring'] = true })
+    frame({ ['##gm_zb_107:1_' .. spawns.id(107, 5) .. '_Bring'] = true })
     eq(#calls.send, 0, 'no bring in another zone')
     frame({ ['##gm_zb_mine'] = true })
     eq(window.state.zb.zone, nil, 'back to yours')

@@ -198,24 +198,7 @@ local HELP = {
     '/gmt help  this list',
 }
 
--- A page by its id or title, any case, a prefix will do.
-local function page_named(s)
-    s = s:lower()
-    local pages = { 'favorites', 'console', 'history', 'settings' }
-    for _, p in ipairs(catalog.PAGES) do pages[#pages + 1] = p[1] end
-    for _, id in ipairs({ 'target', 'nearby', 'zones', 'macros', 'places' }) do pages[#pages + 1] = id end
-    local TITLES = { zones = 'zone browser' }
-    local function title(id)
-        local p = catalog.page_of[id]
-        return p and p.title:lower() or TITLES[id] or id
-    end
-    for _, id in ipairs(pages) do  -- a whole name first, then the first a prefix fits
-        if id == s or title(id) == s then return id end
-    end
-    for _, id in ipairs(pages) do
-        if id:sub(1, #s) == s or title(id):sub(1, #s) == s then return id end
-    end
-end
+local page_named = catalog.page_named  -- by id or title, any case, a prefix will do
 
 local function open_page(id)
     store.cfg.ui.open, store.cfg.ui.page = true, id
@@ -249,6 +232,7 @@ ashita.events.register('command', 'gmtool_command', function (e)
         return printf('GM Bar %s.', store.cfg.ui.bar and 'on' or 'off')
     end
     if sub == 'page' then
+        if rest:match('^%s*$') then return say(chat.error, '/gmt page <name>: favorites, target, nearby, zones, player, travel...') end
         local id = page_named(rest)
         if not id then return say(chat.error, 'No page "%s". /gmt help', rest) end
         return open_page(id)

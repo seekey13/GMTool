@@ -16,6 +16,9 @@
                                   -> data/spawns.lua     every mob and NPC of each zone, by name, with its ids
 ]]--
 
+package.path = './?.lua;' .. package.path
+local sql = require('tools.sql')
+
 local root = (arg and arg[1]) or '../../../../../catseyexi'
 root = root:gsub('[/\\]+$', '')
 
@@ -204,9 +207,9 @@ end
 -- Currencies -------------------------------------------------------------------------------------------------------
 
 do
-    local sql = must(root .. '/sql/char_points.sql')
+    local points = must(root .. '/sql/char_points.sql')
     local names = {}
-    for col in sql:gmatch('\n%s*`([%w_]+)`') do
+    for col in points:gmatch('\n%s*`([%w_]+)`') do
         if col ~= 'charid' then names[#names + 1] = col end
     end
     local lines = { 'return {' }
@@ -218,54 +221,8 @@ end
 
 -- Mobs and NPCs -----------------------------------------------------------------------------------------------------
 
--- The values of one `INSERT INTO ... VALUES (...);` line, by column: numbers as numbers, strings unquoted (\' and ''
--- read as '), NULL as nil. Nil for any other line.
-local function sql_row(line)
-    local body = line:match('^INSERT INTO [^(]*VALUES%s*%((.*)%)%s*;')
-    if not body then return nil end
-    local out, n, i, len = {}, 0, 1, #body
-    while i <= len do
-        local c = body:sub(i, i)
-        if c == ' ' then
-            i = i + 1
-        elseif c == '\'' then
-            local j, parts = i + 1, {}
-            while j <= len do
-                local ch = body:sub(j, j)
-                if ch == '\\' then
-                    parts[#parts + 1] = body:sub(j + 1, j + 1)
-                    j = j + 2
-                elseif ch == '\'' then
-                    if body:sub(j + 1, j + 1) ~= '\'' then break end
-                    parts[#parts + 1] = '\''
-                    j = j + 2
-                else
-                    parts[#parts + 1] = ch
-                    j = j + 1
-                end
-            end
-            n = n + 1
-            out[n] = table.concat(parts)
-            local comma = body:find(',', j + 1, true)
-            i = comma and comma + 1 or len + 1
-        else
-            local comma = body:find(',', i, true) or (len + 1)
-            local tok = body:sub(i, comma - 1):match('^%s*(.-)%s*$')
-            n = n + 1
-            if tok ~= 'NULL' then out[n] = tonumber(tok) or tok end
-            i = comma + 1
-        end
-    end
-    out.n = n
-    return out
-end
-
-local function sql_rows(path, fn)
-    for line in must(path):gmatch('[^\r\n]+') do
-        local r = sql_row(line)
-        if r then fn(r) end
-    end
-end
+-- The sql dumps' rows (tools/sql.lua).
+local function sql_rows(path, fn) sql.rows(must(path), fn) end
 
 -- An entity's zone and its index in the zone, from its server id (0x1000000 + zone * 4096 + index).
 local function zone_index(id)
@@ -293,13 +250,13 @@ local function shown_name(shown, name)
 end
 
 do
-    local sql = root .. '/sql/'
+    local dir = root .. '/sql/'
     local families = {}
-    sql_rows(sql .. 'mob_family_system.sql', function (r) families[r[1]] = r[2] end)
+    sql_rows(dir .. 'mob_family_system.sql', function (r) families[r[1]] = r[2] end)
     local pools = {}  -- [poolid] = { mobType, familyid, mJob }
-    sql_rows(sql .. 'mob_pools.sql', function (r) pools[r[1]] = { type = r[15] or 0, family = r[4] or 0, job = r[6] or 0 } end)
+    sql_rows(dir .. 'mob_pools.sql', function (r) pools[r[1]] = { type = r[15] or 0, family = r[4] or 0, job = r[6] or 0 } end)
     local groups = {}  -- [zone][groupid] = { pool, respawn, spawntype, minLv, maxLv }
-    sql_rows(sql .. 'mob_groups.sql', function (r)
+    sql_rows(dir .. 'mob_groups.sql', function (r)
         local z = r[3]
         groups[z] = groups[z] or {}
         groups[z][r[1]] = { pool = r[2], respawn = r[5] or 0, spawntype = r[6] or 0, lo = r[10] or 0, hi = r[11] or 0 }
@@ -316,7 +273,7 @@ do
         end
         e.idx[#e.idx + 1] = index
     end
-    sql_rows(sql .. 'mob_spawn_points.sql', function (r)
+    sql_rows(dir .. 'mob_spawn_points.sql', function (r)
         local id = r[1]
         if seen[id] then return end
         seen[id] = true
@@ -330,11 +287,12 @@ do
             return { 'm', name, g.lo or 0, g.hi or 0, p.type or 0, g.respawn or 0, g.spawntype or 0, p.family or 0, p.job or 0 }
         end, index)
     end)
-    sql_rows(sql .. 'npc_list.sql', function (r)
+    sql_rows(dir .. 'npc_list.sql', function (r)
         local id = r[1]
-        local name = shown_name(r[3], r[2])
-        -- placeholders the client never names, and invisible helpers
-        if name == '' or name == 'NPC' or not name:find('%S') then return end
+        -- the client's name; for one it shows none (polutils 'NPC': doors, gates), the server's, but for its
+        -- NPC[..] placeholders and invisible helpers
+        local name = r[3] == 'NPC' and tostring(r[2] or ''):match('^%s*(.-)%s*$') or shown_name(r[3], r[2])
+        if name == '' or not name:find('%S') or name:match('^NPC%[') then return end
         local z, index = zone_index(id)
         if z < 0 or z > 1023 then return end
         count.npcs = count.npcs + 1
@@ -354,7 +312,12 @@ do
             list[#list + 1] = e
             if e[1] == 'm' and e[8] ~= 0 then used[e[8]] = true end
         end
-        table.sort(list, function (a, b) return a.first < b.first end)
+        -- by first index; a mob and an NPC sharing one (a chest that is both), the mob first: the same each run
+        table.sort(list, function (a, b)
+            if a.first ~= b.first then return a.first < b.first end
+            if a[1] ~= b[1] then return a[1] < b[1] end
+            return a[2] < b[2]
+        end)
         local rows = {}
         for _, e in ipairs(list) do
             local f = {}

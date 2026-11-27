@@ -27,6 +27,8 @@
 
 local catalog = {}
 
+local function util_trim(s) return (tostring(s or ''):gsub('^%s+', ''):gsub('%s+$', '')) end
+
 -- Pages, in the sidebar's order: { id, title, blurb }.
 catalog.PAGES = {
     { 'vitals', 'Player', 'HP, MP and TP, raising, immortality and resets for a player.' },
@@ -494,6 +496,29 @@ for _, c in ipairs(list) do
     local p = catalog.page_of[c.page]
     assert(p, 'no page ' .. tostring(c.page) .. ' for ' .. c.key)
     p.commands[#p.commands + 1] = c
+end
+
+-- The window's pages that aren't a group of commands, by id, with the title the sidebar shows.
+catalog.TOOL_PAGES = { { 'favorites', 'Favorites' }, { 'console', 'Console' }, { 'history', 'History' },
+                       { 'settings', 'Settings' }, { 'target', 'Target' }, { 'nearby', 'Nearby' },
+                       { 'zones', 'Zone Browser' }, { 'macros', 'Macros' }, { 'places', 'Places' } }
+
+-- The page `s` names (/gmt page): its id or title, any case; a whole one first, else the first a prefix of fits, in
+-- the order Favorites, Console, History, Settings, the command pages, then Target, Nearby, Zone Browser, Macros,
+-- Places (so 'pl' is still Player, as before the last five could be named). Nil for none.
+function catalog.page_named(s)
+    s = util_trim(s):lower()
+    if s == '' then return nil end
+    local pages = {}
+    for i = 1, 4 do pages[#pages + 1] = catalog.TOOL_PAGES[i] end
+    for _, p in ipairs(catalog.PAGES) do pages[#pages + 1] = p end
+    for i = 5, #catalog.TOOL_PAGES do pages[#pages + 1] = catalog.TOOL_PAGES[i] end
+    for _, p in ipairs(pages) do
+        if p[1] == s or p[2]:lower() == s then return p[1] end
+    end
+    for _, p in ipairs(pages) do
+        if p[1]:sub(1, #s) == s or p[2]:lower():sub(1, #s) == s then return p[1] end
+    end
 end
 
 -- The commands whose name, title, description or note holds every word of `q` (any case).

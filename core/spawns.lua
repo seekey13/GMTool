@@ -86,22 +86,25 @@ function spawns.zone(zone)
     return out
 end
 
-local by_id = {}  -- [zone] = { [server id] = entry }
+local by_id = {}  -- [zone] = { mob = { [server id] = entry }, npc = { ... } }
 
--- The entry holding server id `id` (in its zone), or nil. (A map made once per zone: the Target page asks each frame.)
-function spawns.find(id)
+-- The entry holding server id `id` (in its zone), or nil: of kind `kind` ('mob' or 'npc') when given, as a few ids
+-- are both (a chest that's a mob and an NPC); else the mob. (Maps made once per zone: the Target page asks each
+-- frame.)
+function spawns.find(id, kind)
     id = tonumber(id)
     if not id or id < BASE then return nil end
     local zone = spawns.zone_of(id)
-    local map = by_id[zone]
-    if not map then
-        map = {}
+    local maps = by_id[zone]
+    if not maps then
+        maps = { mob = {}, npc = {} }
         for _, e in ipairs(spawns.zone(zone)) do
-            for _, x in ipairs(e.ids) do map[x] = e end
+            for _, x in ipairs(e.ids) do maps[e.kind][x] = maps[e.kind][x] or e end
         end
-        by_id[zone] = map
+        by_id[zone] = maps
     end
-    return map[id]
+    if kind == 'mob' or kind == 'npc' then return maps[kind][id] end
+    return maps.mob[id] or maps.npc[id]
 end
 
 -- Forget what was parsed (the tests' new source).
@@ -126,7 +129,7 @@ function spawns.filter(list, kind, q)
     q = tostring(q or ''):lower()
     local want = {}
     for w in q:gmatch('%S+') do want[#want + 1] = w end
-    local n = #want == 1 and tonumber(want[1]) or nil
+    local n = #want == 1 and want[1]:match('^%d+$') and tonumber(want[1]) or nil
     local out = {}
     for _, e in ipairs(list) do
         local fits = kind == 'all' or (kind == 'nm' and e.nm) or (kind == 'mob' and e.kind == 'mob') or (kind == 'npc' and e.kind == 'npc')
@@ -162,12 +165,12 @@ function spawns.duration(s)
     return table.concat(out, ' ')
 end
 
--- An entry's tags: { 'NM', 'Scripted' }, { 'hidden' }...
+-- An entry's tags: { 'NM', 'Lottery' }, { 'hidden' }...
 function spawns.tags(e)
     local out = {}
     if e.kind == 'mob' then
         for _, t in ipairs(TYPE_TAGS) do if bit.band(e.type or 0, t[1]) ~= 0 then out[#out + 1] = t[2] end end
-        if bit.band(e.spawn or 0, 0x80) ~= 0 then out[#out + 1] = 'Scripted' end
+        -- (not 'scripted': most mobs are, 0x80; the description says so)
         if bit.band(e.spawn or 0, 0x20) ~= 0 then out[#out + 1] = 'Lottery' end
     elseif NPC_STATUS[e.status] then
         out[1] = NPC_STATUS[e.status]
@@ -206,19 +209,27 @@ function spawns.describe(e, jobs)
     return out
 end
 
+-- A mob a script owns: a battlefield's, an event's, or one called by another (a pet, an add). Spawned by hand, it
+-- can leave that script's state wrong: its Spawn asks twice.
+local SCRIPTED = BATTLEFIELD + EVENT + CALLED
+function spawns.owned(e) return e.kind == 'mob' and bit.band(e.type or 0, SCRIPTED) ~= 0 end
+
 -- What a row offers for id `id` of entry `e`: { label, line, tip, asks twice }. `here`: it's in your zone (bring
 -- works only there: the server despawns a mob it can't move).
 function spawns.buttons(e, id, here)
     local out = {}
     if e.kind == 'mob' then
-        out[#out + 1] = { 'Spawn', '!spawnmob ' .. id, 'Spawn it at its spawn point (if it isn\'t up)' }
+        local owned = spawns.owned(e)
+        out[#out + 1] = { 'Spawn', '!spawnmob ' .. id, owned
+            and 'Spawn it at its spawn point. A battlefield\'s, event\'s or called mob: its script may not expect it'
+            or 'Spawn it at its spawn point (if it isn\'t up)', owned }
         out[#out + 1] = { 'Go to', '!gotoid ' .. id, here and 'Go to it (where it is, else where it was last)'
             or 'Go to it: zones you there' }
         if here then out[#out + 1] = { 'Bring', '!mobhere ' .. id, 'Spawn it if needed and move it to you', true } end
         out[#out + 1] = { 'Despawn', '!despawnmob ' .. id, 'Despawn it', true }
     else
         out[#out + 1] = { 'Go to', '!gotoid ' .. id, here and 'Go to it' or 'Go to it: zones you there' }
-        if here then out[#out + 1] = { 'Bring', '!npchere ' .. id, 'Move it to you (for everyone in the zone)', true } end
+        if here then out[#out + 1] = { 'Bring', '!npchere ' .. id, 'Move it to you and show it, hidden or not, for everyone in the zone', true } end
     end
     return out
 end

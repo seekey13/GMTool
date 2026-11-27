@@ -142,3 +142,39 @@ test('data/spawns.lua: a known NM, with its levels and family', function ()
     eq(spawns.find(lizzy.ids[1]), lizzy)
     assert(spawns.describe(lizzy)[2]:find('Lizard family'), 'its family')
 end)
+
+test('an id both a mob and an NPC: find by kind, the mob by default', function ()
+    spawns.source = function ()
+        return { zones = { [230] = 'm|Cursed Chest|1|1|0|0|0|0|1|40\nn|Cursed Chest|0|40' }, families = {} }
+    end
+    spawns.reset()
+    local id = spawns.id(230, 40)
+    eq(spawns.find(id, 'npc').kind, 'npc')
+    eq(spawns.find(id, 'mob').kind, 'mob')
+    eq(spawns.find(id).kind, 'mob')
+    eq(spawns.find(id, 'other').kind, 'mob', 'a pet\'s kind: either')
+    restore()
+end)
+
+test('filter: only plain digits are an id (not 0x10, 1e1)', function ()
+    fake()
+    local z = spawns.zone(230)
+    eq(#spawns.filter(z, 'all', '0x10'), 0)
+    eq(#spawns.filter(z, 'all', '1e1'), 0)
+    eq(spawns.filter(z, 'all', '10')[1].name, 'Crab')
+    restore()
+end)
+
+test('a battlefield\'s, event\'s or called mob asks twice to spawn', function ()
+    for _, t in ipairs({ 0x08, 0x10, 0x20 }) do
+        local e = { kind = 'mob', name = 'x', type = t, ids = { 1 } }
+        eq(spawns.buttons(e, 1, true)[1][4], true, 'type ' .. t)
+    end
+    eq(spawns.buttons({ kind = 'mob', name = 'x', type = 2, ids = { 1 } }, 1, true)[1][4], false, 'an NM: at once')
+end)
+
+test('no scripted tag: most mobs are', function ()
+    eq(spawns.tags({ kind = 'mob', type = 2, spawn = 0x80 }), { 'NM' })
+    assert(spawns.describe({ kind = 'mob', name = 'x', type = 2, spawn = 0x80, respawn = 0, lo = 0, hi = 0, ids = { 1 } })[2]
+        :find('by script'), 'the description says it')
+end)
