@@ -191,6 +191,7 @@ local HELP = {
     '/gmt <command> [args]  send a GM command through GM Tool: /gmt hp 100 Kupipi, /gmt !where',
     '/gmt page <name>  open a page: favorites, target, nearby, zones, player, travel, items, macros, history...',
     '/gmt find <words>  open the window searching for commands',
+    '/gmt player <name>  open a player on the Players page: their actions by name, in any zone',
     '/gmt macro <name>  run a macro (Macros page)',
     '/gmt place <name> [player]  put yourself, or a player, at a saved place (Places page)',
     '/gmt clear  drop every line still waiting in the queue',
@@ -236,6 +237,11 @@ ashita.events.register('command', 'gmtool_command', function (e)
         local id = page_named(rest)
         if not id then return say(chat.error, 'No page "%s". /gmt help', rest) end
         return open_page(id)
+    end
+    if sub == 'player' or sub == 'who' then
+        open_page('players')
+        window.state.pl = { name = { (rest:match('^%s*(%S*)')) } }
+        return
     end
     if sub == 'find' or sub == 'search' then
         open_page(store.cfg.ui.page or 'favorites')

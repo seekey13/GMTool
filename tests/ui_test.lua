@@ -67,7 +67,7 @@ local function open_all()
 end
 
 -- Every page, so every page's own code runs.
-local PAGES = { 'favorites', 'target', 'nearby', 'zones', 'console', 'history', 'settings', 'macros', 'places' }
+local PAGES = { 'favorites', 'target', 'players', 'nearby', 'zones', 'console', 'history', 'settings', 'macros', 'places' }
 for _, p in ipairs(catalog.PAGES) do PAGES[#PAGES + 1] = p[1] end
 
 test('every page draws, every card open, every list shown', function ()
@@ -603,4 +603,46 @@ test('acting on: Party sends a card\'s line for each member, all at once', funct
     frame(nil, { players = {} })
     assert(fake.drew('you alone'), 'says so')
     store.cfg.acting.mode = 'target'
+end)
+
+test('players: any player by name, the cursor\'s actions only while targeted', function ()
+    fresh()
+    window.state.page, window.state.pl = 'players', nil
+    frame(nil, { target = false })
+    assert(fake.drew('Type or pick a player'), 'asks for a name')
+    assert(fake.drew('Ajido') and fake.drew('Trion'), 'the names it knows')
+    frame({ ['##gm_pl_pick_trion'] = true }, { target = false })
+    eq(window.state.pl.name[1], 'Trion', 'a click picks')
+    frame(nil, { target = false })
+    assert(fake.drew('12.0 yalms away'), 'where they are')
+    frame({ ['##gm_pact_Bring'] = true }, { target = false })
+    eq(calls.lines[1].lines, { '!bring Trion' })
+    eq(store.cfg.names[1], 'Trion', 'a recent name now')
+    frame({ ['##gm_pact_Kick'] = true }, { target = false })
+    eq(#calls.lines, 0, 'kick asks twice')
+    frame({ ['##gm_pact_Server id'] = true }, { target = false })
+    eq(#calls.lines, 0, 'no cursor action for one not targeted')
+    -- targeted: the cursor's actions too
+    window.state.pl.name[1] = 'Kupipi'
+    frame({ ['##gm_pact_Server id'] = true })
+    eq(calls.lines[1].lines, { '!getid' })
+    -- not a name
+    window.state.pl.name[1] = 'Ku pipi'
+    frame()
+    assert(fake.drew('is not a character name'), 'says so')
+    -- someone GM Tool can't see
+    window.state.pl.name[1] = 'Zeid'
+    frame()
+    assert(fake.drew('the server finds them by name'), 'by name anyway')
+    window.state.pl = nil
+end)
+
+test('nearby: a player\'s name opens them on the Players page', function ()
+    fresh()
+    window.state.page, window.state.near, window.state.pl = 'nearby', nil, nil
+    frame()
+    frame({ ['##gm_near_1100_who'] = true })
+    eq(window.state.page, 'players')
+    eq(window.state.pl.name[1], 'Kupipi')
+    window.state.pl, window.state.near = nil, nil
 end)

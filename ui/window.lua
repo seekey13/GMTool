@@ -1159,6 +1159,38 @@ local function jobs()
     return job_names
 end
 
+-- Actions (core/actions.lua's), by group, in rows of buttons; a risky one asks twice. `prefix` keeps their ids
+-- apart. `sent(a)`, when given, is told of each one sent.
+local function action_grid(pg, list, prefix, sent)
+    local groups, order = {}, {}
+    for _, a in ipairs(list) do
+        if not groups[a.group] then groups[a.group], order[#order + 1] = {}, a.group end
+        table.insert(groups[a.group], a)
+    end
+    for _, g in ipairs(order) do
+        subheader(pg, g)
+        local x, cy = pg.lx, pg.y + S(13)
+        for _, a in ipairs(groups[g]) do
+            local w = kit.button_width(a.label)
+            if x + w > pg.right and x > pg.lx then
+                x, pg.y = pg.lx, pg.y + S(30)
+                cy = pg.y + S(13)
+            end
+            local id = ('##gm_%s_%s'):format(prefix, a.label)
+            local clicked, bw_
+            if a.danger then clicked, bw_ = guarded(id, x, cy, a.label, 'danger')
+            else clicked, bw_ = kit.button(id, x, cy, a.label, 'ghost') end
+            kit.tip(a.tip .. '\n' .. table.concat(a.lines, '\n') .. (a.cursor and '\n(waits for the server to have your target)' or ''))
+            if clicked then
+                act.send_lines(a.lines, a.label)
+                if sent then sent(a) end
+            end
+            x = x + (bw_ or w) + S(6)
+        end
+        pg.y = pg.y + S(32)
+    end
+end
+
 local function target_page(pg)
     local t = view.target
     if not t then
@@ -1195,30 +1227,97 @@ local function target_page(pg)
     kit.circle(d, pg.right - kit.measure(heard, kit.fonts.text, S(SMALL - 1)) - S(10), y + S(19), S(3), view.ready and P.teal or P.amber)
     kit.text_right(d, pg.right, y + S(19), heard, view.ready and P.teal or P.amber, kit.fonts.text, S(SMALL - 1))
     pg.y = y + h + S(4)
-    -- its actions, by group, laid out in rows
-    local groups, order = {}, {}
-    for _, a in ipairs(actions.for_target(t, view.me and view.me.name)) do
-        if not groups[a.group] then groups[a.group], order[#order + 1] = {}, a.group end
-        table.insert(groups[a.group], a)
-    end
-    for _, g in ipairs(order) do
-        subheader(pg, g)
-        local x, cy = pg.lx, pg.y + S(13)
-        for _, a in ipairs(groups[g]) do
-            local w = kit.button_width(a.label)
-            if x + w > pg.right and x > pg.lx then
-                x, pg.y = pg.lx, pg.y + S(30)
-                cy = pg.y + S(13)
-            end
-            local id = ('##gm_tact_%s_%d_%s'):format(t.kind, t.index or 0, a.label)
-            local clicked, bw_
-            if a.danger then clicked, bw_ = guarded(id, x, cy, a.label, 'danger')
-            else clicked, bw_ = kit.button(id, x, cy, a.label, 'ghost') end
-            kit.tip(a.tip .. '\n' .. table.concat(a.lines, '\n') .. (a.cursor and '\n(waits for the server to have your target)' or ''))
-            if clicked then act.send_lines(a.lines, a.label) end
-            x = x + (bw_ or w) + S(6)
+    action_grid(pg, actions.for_target(t, view.me and view.me.name), ('tact_%s_%d'):format(t.kind, t.index or 0))
+end
+
+-- Players -----------------------------------------------------------------------------------------------------
+-- Any player by name, targeted or not, in any zone: the Target page's actions for them by name (those that read
+-- the cursor only while they are your target), and below, the names GM Tool knows: you, your target, party,
+-- players near you, recent names.
+
+-- What GM Tool can tell of player `name`: { targeted, party, near (yalms), zone }.
+local function player_seen(name)
+    local low, out = name:lower(), {}
+    local t = view.target
+    out.targeted = t and t.kind == 'pc' and t.name:lower() == low
+    if view.me and view.me.name:lower() == low then out.me, out.zone = true, view.me.zone end
+    for _, p in ipairs(view.players or {}) do
+        if p.name:lower() == low then
+            out.party, out.zone = p.party, p.zone
+            if not p.party or (p.dist or 0) > 0 then out.near = p.dist end
         end
-        pg.y = pg.y + S(32)
+    end
+    if out.targeted and t.dist then out.near = t.dist end
+    return out
+end
+
+local function players_page(pg)
+    state.pl = state.pl or { name = { '' } }
+    local pl = state.pl
+    -- the name: typed, or picked
+    local cy = pg.y + S(15)
+    pg.y = pg.y + S(36)
+    local pick_w = S(26)
+    local fw = pg.right - pg.lx - pick_w - S(4)
+    kit.input('##gm_pl_name', pg.lx, cy, fw, pl.name, 16, 'a player\'s name')
+    local bx = pg.right - pick_w
+    local hovered, clicked = kit.hit('##gm_pl_names', bx, cy - S(13), pick_w, S(26))
+    kit.fill(pg.dl, bx, cy - S(13), pick_w, S(26), hovered and P.hover or P.well, S(5))
+    kit.outline(pg.dl, bx, cy - S(13), pick_w, S(26), hovered and P.accent_lo or P.well_edge, S(5))
+    kit.icon(pg.dl, 'down', bx + pick_w / 2, cy, S(11), P.dim)
+    kit.tip('Pick a player: your target, party, players nearby, recent names')
+    if clicked then imgui.OpenPopup('##gm_pl_names.list') end
+    names_popup('##gm_pl_names.list', pg.lx, cy + S(14), pg.right - pg.lx, function (n) pl.name[1] = n end)
+    local name = util.trim(pl.name[1])
+    if name == '' then
+        note(pg, 'Type or pick a player: what you can do to them by name, in any zone, shows here.', P.text2)
+    elseif not build.is_name(name) then
+        note(pg, ('"%s" is not a character name (3 to 15 letters).'):format(name), P.rose)
+    else
+        local seen = player_seen(name)
+        local d = pg.dl
+        local y, h = pg.y, S(58)
+        local bx_, bw = pg.lx - S(8), pg.right - pg.lx + S(16)
+        kit.fill(d, bx_, y, bw, h, P.well, S(5), 0.7)
+        kit.outline(d, bx_, y, bw, h, P.line, S(5))
+        local name_px = S(BODY + 2)
+        kit.text_mid(d, pg.lx, y + S(19), name, P.white, kit.fonts.semi, name_px)
+        local bits = {}
+        if seen.me then bits[#bits + 1] = 'you' end
+        if seen.targeted then bits[#bits + 1] = 'your target' end
+        if seen.party then bits[#bits + 1] = 'in your party' end
+        if seen.near then bits[#bits + 1] = ('%.1f yalms away'):format(seen.near) end
+        if seen.zone then bits[#bits + 1] = data.zone_name(seen.zone) or ('zone ' .. seen.zone) end
+        local where = #bits > 0 and table.concat(bits, '  \194\183  ')
+            or 'Not near you or in your party: the server finds them by name if they are online.'
+        kit.text_mid(d, pg.lx, y + S(41), kit.fit(where, bw - S(16), kit.fonts.text, S(SMALL)), #bits > 0 and P.text2 or P.dim,
+            kit.fonts.text, S(SMALL))
+        pg.y = y + h + S(4)
+        -- by name, the cursor's actions only while they are your target
+        local list = {}
+        for _, a in ipairs(actions.for_target({ name = name, kind = 'pc' }, view.me and view.me.name)) do
+            if not a.cursor or seen.targeted then list[#list + 1] = a end
+        end
+        action_grid(pg, list, 'pact', function () store.name_used(name) end)
+    end
+    -- the names GM Tool knows
+    subheader(pg, 'Players you know')
+    local choices = name_choices()
+    if #choices == 0 then note(pg, 'No one yet: log in, or send a command to someone.', P.dim) end
+    local d = pg.dl
+    for _, n in ipairs(choices) do
+        local y = pg.y
+        local lcy = line(pg, nil)
+        if y < pg.bottom and y + S(ROW_H) > pg.top then
+            local on = n.name:lower() == name:lower()
+            local hov, click = kit.hit('##gm_pl_pick_' .. n.name:lower(), pg.lx - S(4), y + S(2), pg.right - pg.lx + S(8), S(ROW_H) - S(4))
+            if on then kit.fill(d, pg.lx - S(4), y + S(2), S(2), S(ROW_H) - S(4), P.accent) end
+            kit.circle(d, pg.lx + S(3), lcy, S(3.5), P.teal)
+            kit.text_mid(d, pg.lx + S(14), lcy, n.name, on and P.white or (hov and P.text or P.text2), kit.fonts.text, S(BODY - 1))
+            local tag = n.label:sub(#n.name + 3)
+            kit.text_right(d, pg.right, lcy, tag, P.dim, kit.fonts.text, S(SMALL))
+            if click then pl.name[1] = n.name end
+        end
     end
 end
 
@@ -1281,7 +1380,18 @@ local function nearby_page(pg)
             local k = KIND[e.kind] or KIND.other
             kit.circle(d, pg.lx + S(3), lcy, S(3.5), k[2])
             local nx = pg.lx + S(14)
-            kit.text_mid(d, nx, lcy, kit.fit(e.name, S(150), kit.fonts.text, S(BODY - 1)), P.white, kit.fonts.text, S(BODY - 1))
+            local name_hot = false
+            if e.kind == 'pc' then
+                local hov, click = kit.hit(('##gm_near_%d_who'):format(e.index), nx - S(2), y + S(4), S(154), S(ROW_H) - S(8))
+                name_hot = hov
+                kit.tip('Open on the Players page')
+                if click then
+                    state.pl = state.pl or { name = { '' } }
+                    state.pl.name[1], state.page = e.name, 'players'
+                end
+            end
+            kit.text_mid(d, nx, lcy, kit.fit(e.name, S(150), kit.fonts.text, S(BODY - 1)), name_hot and P.accent2 or P.white,
+                kit.fonts.text, S(BODY - 1))
             local idx = pg.lx + S(170)
             local shown = e.kind == 'pc' and ('%.1fy'):format(e.dist) or ('%d  \194\183  %.1fy'):format(e.sid or 0, e.dist)
             local hovered, clicked = kit.hit(('##gm_near_%d_id'):format(e.index), idx - S(2), y + S(4),
@@ -1610,6 +1720,7 @@ local function sidebar(x, y, w, h)
             local ny = cy + S(2)
             ny = ny + nav_item('favorites', 'Favorites', cx, ny, w, #view.cfg.favorites > 0 and #view.cfg.favorites or nil)
             ny = ny + nav_item('target', 'Target', cx, ny, w)
+            ny = ny + nav_item('players', 'Players', cx, ny, w)
             ny = ny + nav_item('nearby', 'Nearby', cx, ny, w)
             ny = ny + nav_item('zones', 'Zone Browser', cx, ny, w)
             for _, p in ipairs(catalog.PAGES) do
@@ -1638,7 +1749,7 @@ local function close_mark(id, cx, cy, box)
     return clicked
 end
 
-local TITLES = { favorites = 'Favorites', target = 'Target', nearby = 'Nearby', zones = 'Zone Browser', console = 'Console',
+local TITLES = { favorites = 'Favorites', target = 'Target', players = 'Players', nearby = 'Nearby', zones = 'Zone Browser', console = 'Console',
                  history = 'History', settings = 'Settings', search = 'Search', macros = 'Macros', places = 'Places' }
 
 local function page_title(id)
@@ -1682,6 +1793,7 @@ local function page(x, y, w, h)
                          right = cx + w - S(PAD), alpha = 1, top = body_y, bottom = body_y + body_h }
             if id == 'favorites' then favorites_page(pg)
             elseif id == 'target' then target_page(pg)
+            elseif id == 'players' then players_page(pg)
             elseif id == 'nearby' then nearby_page(pg)
             elseif id == 'zones' then zones_page(pg)
             elseif id == 'search' then search_page(pg)

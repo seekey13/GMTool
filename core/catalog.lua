@@ -500,7 +500,7 @@ end
 
 -- The window's pages that aren't a group of commands, by id, with the title the sidebar shows.
 catalog.TOOL_PAGES = { { 'favorites', 'Favorites' }, { 'console', 'Console' }, { 'history', 'History' },
-                       { 'settings', 'Settings' }, { 'target', 'Target' }, { 'nearby', 'Nearby' },
+                       { 'settings', 'Settings' }, { 'target', 'Target' }, { 'players', 'Players' }, { 'nearby', 'Nearby' },
                        { 'zones', 'Zone Browser' }, { 'macros', 'Macros' }, { 'places', 'Places' } }
 
 -- The page `s` names (/gmt page): its id or title, any case; a whole one first, else the first a prefix of fits, in
