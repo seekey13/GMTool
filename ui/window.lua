@@ -1691,7 +1691,7 @@ local function copy_id(id, name)
 end
 
 -- A row's words after the name: its tags (NM in amber), levels, and count or id. Returns the x after them.
-local function zb_info(d, x, cy, room, e, nup)
+local function zb_info(d, x, cy, room, e, nup, zone_label)
     local px = S(SMALL)
     local tags = spawns.tags(e)
     if e.nm and room > S(30) then
@@ -1701,6 +1701,7 @@ local function zb_info(d, x, cy, room, e, nup)
         table.remove(tags, 1)
     end
     local bits = {}
+    if zone_label then bits[1] = zone_label end
     for _, t in ipairs(tags) do bits[#bits + 1] = t end
     if spawns.levels(e) ~= '' then bits[#bits + 1] = spawns.levels(e) end
     bits[#bits + 1] = #e.ids > 1 and ('\195\151' .. #e.ids) or tostring(e.ids[1])
@@ -1711,12 +1712,14 @@ local function zb_info(d, x, cy, room, e, nup)
     end
 end
 
+local zb_rows  -- (below)
+
 local function zones_page(pg)
     state.zb = state.zb or { kind = 1, q = { '' }, open = {} }
     local zb = state.zb
     local mine = view.me and view.me.zone
     local zone = zb.zone or mine
-    local here = zone ~= nil and zone == mine
+    local every = zone == 'all'  -- every zone, searched
     -- the zone, and which kind
     local cy = pg.y + S(15)
     pg.y = pg.y + S(34)
@@ -1729,10 +1732,14 @@ local function zones_page(pg)
     local away = zb.zone ~= nil and mine ~= nil and zb.zone ~= mine
     local mine_w = kit.button_width('Mine')
     local zw = pg.right - sw - S(10) - pg.lx - (away and (mine_w + S(6)) or 0)
-    local ze = zone and data.find(ZONES, tostring(zone))
-    local shown = ze and ze.label or (zone and ('Zone ' .. zone)) or '(pick a zone)'
+    local ze = zone and not every and data.find(ZONES, tostring(zone))
+    local shown = every and 'All zones' or ze and ze.label or (zone and ('Zone ' .. zone)) or '(pick a zone)'
     kit.dropdown('##gm_zb_zone', pg.lx, cy, zw, shown, true, 1, function ()
         local q = filter_box('##gm_zb_zone', math.max(zw, S(360)) - S(20))
+        if kit.selectable('All zones: search every one##gm_zb_all', every) then
+            zb.zone, zb.open = 'all', {}
+            imgui.CloseCurrentPopup()
+        end
         pick_list('##gm_zb_zone', data.filter(data.list(ZONES), q, 300), ze, function (e)
             zb.zone = e.id ~= mine and e.id or nil
             zb.open = {}
@@ -1750,6 +1757,21 @@ local function zones_page(pg)
         note(pg, 'Pick a zone: every mob and NPC in it, from the server\'s database.', P.text2)
         return
     end
+    if every then
+        local q, kind = util.trim(zb.q[1]), ZB_KINDS[zb.kind][1]
+        if #q < 2 and kind ~= 'nm' then
+            note(pg, 'Type two letters or more of a name (or pick NMs): every zone is searched.', P.text2)
+            return
+        end
+        local done, n, total = spawns.step(30)
+        local list, more = spawns.search(kind, q, 200)
+        note(pg, done and (('%d found%s. Go to zones you there; Bring is for your own zone.'):format(#list,
+            more and ' (the first 200: type more of the name)' or '')) or ('Searching... %d of %d zones.'):format(n, total), P.dim)
+        if done and #list == 0 then note(pg, 'Nothing in any zone matches.', P.dim) return end
+        zb_rows(pg, list, mine, true)
+        return
+    end
+    local here = zone == mine
     local all = spawns.zone(zone)
     if #all == 0 then
         note(pg, 'The server\'s database has no mobs or NPCs in this zone.', P.dim)
@@ -1764,9 +1786,16 @@ local function zones_page(pg)
         note(pg, 'Nothing in this zone matches.', P.dim)
         return
     end
+    zb_rows(pg, list, mine, false)
+end
+
+-- The Zone Browser's rows for `list`: each its name and facts, its buttons (Bring only for your zone, `mine`), and
+-- open, its ids and drops. `zones`: say each one's zone (every zone's search).
+function zb_rows(pg, list, mine, zones)
+    local zb = state.zb
     -- what's up near you (your zone only: what the client draws)
     local up = {}
-    if here then for _, x in ipairs(view.entities or {}) do if x.sid then up[x.sid] = true end end end
+    for _, x in ipairs(view.entities or {}) do if x.sid then up[x.sid] = true end end
     local d = pg.dl
     local function visible(y) return y < pg.bottom and y + S(ROW_H) > pg.top end
     for _, e in ipairs(list) do
@@ -1774,6 +1803,7 @@ local function zones_page(pg)
         local lcy = line(pg, nil)
         local single = #e.ids == 1
         local open = zb.open[e.key]
+        local here = e.zone == mine
         if visible(y) then
             local nup = 0
             for _, id in ipairs(e.ids) do if up[id] then nup = nup + 1 end end
@@ -1788,7 +1818,7 @@ local function zones_page(pg)
             local hovered, clicked = kit.hit('##gm_zb_row_' .. e.key, pg.x + S(4), y + S(3), nx - pg.x + room, S(ROW_H) - S(6))
             kit.icon(d, open and 'down' or 'right', pg.x + S(GUTTER), lcy, S(10), hovered and P.teal or P.faint)
             kit.text_mid(d, nx, lcy, name, hovered and kit.mix(P.white, P.accent2, 0.35) or P.white, kit.fonts.text, name_px)
-            zb_info(d, nx + nw, lcy, room - nw, e, nup)
+            zb_info(d, nx + nw, lcy, room - nw, e, nup, zones and (data.zone_name(e.zone) or ('zone ' .. e.zone)))
             if hovered then
                 kit.tooltip(table.concat(spawns.describe(e, jobs()), '\n') .. (e.kind == 'mob' and '\nClick for its ids and drops.'
                     or '\nClick for its ids.'))

@@ -803,3 +803,36 @@ test('macros and places: Copy all to the clipboard, Paste adds them', function (
     rawset(fake.imgui, 'SetClipboardText', nil)
     rawset(fake.imgui, 'GetClipboardText', nil)
 end)
+
+test('zone browser: All zones finds a mob in any zone, each row its zone', function ()
+    local spawns = require('core.spawns')
+    local real = spawns.source
+    spawns.source = function ()
+        return { zones = { [230] = 'm|Crab|1|3|0|300|0|1|1|0|10', [154] = 'm|Fafnir|90|90|2|0|128|1|1|0|20' }, families = {} }
+    end
+    spawns.reset()
+    fresh()
+    data.res.zone = function (id) return id == 154 and 'Dragon\'s Aery' or id == 230 and 'Southern San d\'Oria' or nil end
+    data.reset()
+    window.state.page, window.state.zb = 'zones', nil
+    frame({ ['All zones: search every one##gm_zb_all'] = true })
+    eq(window.state.zb.zone, 'all')
+    frame()
+    assert(fake.drew('Type two letters'), 'asks for a name')
+    window.state.zb.q[1] = 'faf'
+    frame()
+    frame()
+    assert(fake.drew('Fafnir') and fake.drew('Dragon\'s Aery'), 'found, with its zone')
+    local id = spawns.id(154, 20)
+    frame({ ['##gm_zb_154:1_' .. id .. '_Spawn'] = true })
+    eq(calls.send[1].line, '!spawnmob ' .. id)
+    frame({ ['##gm_zb_154:1_' .. id .. '_Bring'] = true })
+    eq(#calls.send, 0, 'no Bring: not your zone')
+    frame({ ['##gm_zb_mine'] = true })
+    eq(window.state.zb.zone, nil, 'Mine goes back')
+    spawns.source = real
+    spawns.reset()
+    data.res.zone = function (zid) return zid == 230 and 'Southern San d\'Oria' or nil end
+    data.reset()
+    window.state.zb = nil
+end)

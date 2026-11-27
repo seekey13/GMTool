@@ -108,8 +108,38 @@ function spawns.find(id, kind)
     return maps.mob[id] or maps.npc[id]
 end
 
+-- Every zone, for a search of them all: parsed a few a frame (spawns.step), so a search never stalls the game.
+local every = { zones = nil, next = 1 }
+
+-- Parses up to `budget` more zones for spawns.search. Returns whether every zone is: done, and how many are.
+function spawns.step(budget)
+    if not every.zones then
+        every.zones = {}
+        for z in pairs(spawns.source().zones or {}) do every.zones[#every.zones + 1] = z end
+        table.sort(every.zones)
+    end
+    local stop = math.min(#every.zones, every.next + (budget or 30) - 1)
+    for k = every.next, stop do spawns.zone(every.zones[k]) end
+    every.next = stop + 1
+    return every.next > #every.zones, every.next - 1, #every.zones
+end
+
+-- The entries of every zone parsed so far that spawns.filter keeps, by zone then id, at most `limit` (200);
+-- and whether there were more.
+function spawns.search(kind, q, limit)
+    limit = limit or 200
+    local out = {}
+    for k = 1, every.next - 1 do
+        for _, e in ipairs(spawns.filter(spawns.zone(every.zones[k]), kind, q)) do
+            if #out >= limit then return out, true end
+            out[#out + 1] = e
+        end
+    end
+    return out, false
+end
+
 -- Forget what was parsed (the tests' new source).
-function spawns.reset() parsed, by_id = {}, {} end
+function spawns.reset() parsed, by_id, every = {}, {}, { zones = nil, next = 1 } end
 
 -- How many mobs, NMs and NPCs `list` holds: counted by id, not by row.
 function spawns.counts(list)

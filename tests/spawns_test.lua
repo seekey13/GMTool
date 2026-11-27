@@ -178,3 +178,22 @@ test('no scripted tag: most mobs are', function ()
     assert(spawns.describe({ kind = 'mob', name = 'x', type = 2, spawn = 0x80, respawn = 0, lo = 0, hi = 0, ids = { 1 } })[2]
         :find('by script'), 'the description says it')
 end)
+
+test('every zone: parsed a few at a time, then searched', function ()
+    spawns.source = function ()
+        return { zones = { [230] = 'm|Fafnir|90|90|2|0|128|1|1|0|20', [107] = 'm|Leaping Lizzy|10|11|2|0|32|1|1|0|20\nn|Fafnir Statue|0|30',
+                           [1] = 'm|Crab|1|1|0|0|0|1|1|0|5' }, families = {} }
+    end
+    spawns.reset()
+    local done, n, total = spawns.step(2)
+    eq({ done, n, total }, { false, 2, 3 })
+    eq(#spawns.search('all', 'fafnir'), 1, 'only the zones parsed so far: 1 and 107')
+    done = spawns.step(2)
+    eq(done, true)
+    local found = spawns.search('all', 'fafnir')
+    eq({ found[1].zone, found[2].zone }, { 107, 230 }, 'by zone')
+    eq(#spawns.search('nm', ''), 2, 'every NM')
+    local some, more = spawns.search('all', '', 2)
+    eq({ #some, more }, { 2, true }, 'at most the limit')
+    restore()
+end)
