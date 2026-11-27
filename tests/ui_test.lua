@@ -627,16 +627,16 @@ test('players: any player by name, the cursor\'s actions only while targeted', f
     eq(window.state.pl.name[1], 'Trion', 'a click picks')
     frame(nil, { target = false })
     assert(fake.drew('12.0 yalms away'), 'where they are')
-    frame({ ['##gm_pact_Bring'] = true }, { target = false })
+    frame({ ['##gm_pact_trion_Bring'] = true }, { target = false })
     eq(calls.lines[1].lines, { '!bring Trion' })
     eq(store.cfg.names[1], 'Trion', 'a recent name now')
-    frame({ ['##gm_pact_Kick'] = true }, { target = false })
+    frame({ ['##gm_pact_trion_Kick'] = true }, { target = false })
     eq(#calls.lines, 0, 'kick asks twice')
-    frame({ ['##gm_pact_Server id'] = true }, { target = false })
+    frame({ ['##gm_pact_trion_Server id'] = true }, { target = false })
     eq(#calls.lines, 0, 'no cursor action for one not targeted')
     -- targeted: the cursor's actions too
     window.state.pl.name[1] = 'Kupipi'
-    frame({ ['##gm_pact_Server id'] = true })
+    frame({ ['##gm_pact_kupipi_Server id'] = true })
     eq(calls.lines[1].lines, { '!getid' })
     -- not a name
     window.state.pl.name[1] = 'Ku pipi'
@@ -698,5 +698,26 @@ test('status effects: the last listing as rows, Remove and Remove all', function
     frame({ ['##gm_fx_del_17000001_1_13'] = true }, { target = MOB })
     eq(#calls.lines, 0, 'no Remove for a mob')
     replies.reset()
+    window.state.pl = nil
+end)
+
+test('players: a button armed for one player never sends for the next', function ()
+    fresh()
+    window.state.page, window.state.pl = 'players', { name = { 'Trion' } }
+    frame({ ['##gm_pact_trion_Kick'] = true }, { target = false })
+    eq(#calls.lines, 0, 'armed for Trion')
+    window.state.pl.name[1] = 'Ajido'
+    frame({ ['##gm_pact_ajido_Kick'] = true }, { target = false })
+    eq(#calls.lines, 0, 'Ajido\'s asks again')
+    frame({ ['##gm_pact_ajido_Kick'] = true }, { target = false })
+    eq(calls.lines[1].lines, { '!logoff Ajido' })
+    -- typed in another case: as the game spells it
+    window.state.pl.name[1] = 'trion'
+    frame({ ['##gm_pact_trion_Bring'] = true }, { target = false })
+    eq(calls.lines[1].lines, { '!bring Trion' })
+    eq(store.cfg.names[1], 'Trion', 'recent, as spelt')
+    -- Reset recasts clears YOUR effects: it asks twice
+    frame({ ['##gm_pact_trion_Reset recasts'] = true }, { target = false })
+    eq(#calls.lines, 0, 'reset asks twice')
     window.state.pl = nil
 end)

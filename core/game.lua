@@ -129,7 +129,9 @@ function game.players()
                 local sid = tonumber(p:GetMemberServerId(i)) or 0
                 if n and n ~= '' and not seen[n] and sid < ENTITY_IDS then
                     seen[n] = true
-                    list[#list + 1] = { name = n, dist = 0, party = true, zone = p:GetMemberZone(i) }
+                    local ti = tonumber(p:GetMemberTargetIndex(i)) or 0
+                    local dist = ti > 0 and present(em, ti) and math.sqrt(em:GetDistance(ti)) or 0
+                    list[#list + 1] = { name = n, dist = dist, party = true, zone = p:GetMemberZone(i) }
                 end
             end
         end

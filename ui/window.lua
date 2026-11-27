@@ -1245,8 +1245,8 @@ end
 -- player (`who`) each has Remove: !deleffect, then the list again, so it stays current.
 
 -- The newest history entry for `line` (any case), or nil.
-local function listing(line)
-    local low = line:lower()
+local function listing(l)
+    local low = l:lower()
     for _, e in ipairs(view.cfg.history or {}) do
         if e.line:lower() == low then return e end
     end
@@ -1390,6 +1390,10 @@ local function players_page(pg)
     if clicked then imgui.OpenPopup('##gm_pl_names.list') end
     names_popup('##gm_pl_names.list', pg.lx, cy + S(14), pg.right - pg.lx, function (n) pl.name[1] = n end)
     local name = util.trim(pl.name[1])
+    -- as the game spells it, when GM Tool knows them (the server takes any case; recent names keep this one)
+    for _, n in ipairs(name_choices()) do
+        if n.name:lower() == name:lower() then name = n.name break end
+    end
     if name == '' then
         note(pg, 'Type or pick a player: what you can do to them by name, in any zone, shows here.', P.text2)
     elseif not build.is_name(name) then
@@ -1402,7 +1406,7 @@ local function players_page(pg)
         kit.fill(d, bx_, y, bw, h, P.well, S(5), 0.7)
         kit.outline(d, bx_, y, bw, h, P.line, S(5))
         local name_px = S(BODY + 2)
-        kit.text_mid(d, pg.lx, y + S(19), name, P.white, kit.fonts.semi, name_px)
+        kit.text_mid(d, pg.lx, y + S(19), kit.fit(name, bw - S(16), kit.fonts.semi, name_px), P.white, kit.fonts.semi, name_px)
         local bits = {}
         if seen.me then bits[#bits + 1] = 'you' end
         if seen.targeted then bits[#bits + 1] = 'your target' end
@@ -1419,7 +1423,7 @@ local function players_page(pg)
         for _, a in ipairs(actions.for_target({ name = name, kind = 'pc' }, view.me and view.me.name)) do
             if not a.cursor or seen.targeted then list[#list + 1] = a end
         end
-        action_grid(pg, list, 'pact', function () store.name_used(name) end)
+        action_grid(pg, list, 'pact_' .. name:lower(), function () store.name_used(name) end)
         effects_panel(pg, name, name)
     end
     -- the names GM Tool knows
