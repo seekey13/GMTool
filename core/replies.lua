@@ -23,7 +23,7 @@ local replies = {}
 replies.WINDOW = 2.5
 replies.STRETCH = 1.5
 replies.LONGEST = 8
-replies.MAX = 16
+replies.MAX = 40  -- a well-buffed player's !geteffects lists 30 and more
 
 local open                                           -- the batch being answered: { lines, owner, from, ends }
 local by_entry = setmetatable({}, { __mode = 'k' })  -- [history entry] = its batch
@@ -82,6 +82,36 @@ function replies.position(s)
         "^(%a+)'s position: X (%-?[%d%.]+)%s+Y (%-?[%d%.]+)%s+Z (%-?[%d%.]+)%s+Rot %-?%d+%s+%(Zone: (%d+)%)")
     if not name then return nil end
     return { name = name, x = tonumber(x), y = tonumber(y), z = tonumber(z), zone = tonumber(zone) }
+end
+
+-- A status effect as !geteffects lists it ("[2] PROTECT (40) - Power: 50 | Time: 29m 50s | [Dispelable]"):
+-- { n, name, id, power, sub, time, tick, flags }, or nil.
+function replies.effect(s)
+    local n, name, id, rest = tostring(s):match('^%[(%d+)%] (.-) %((%d+)%)(.*)$')
+    if not n then return nil end
+    local e = { n = tonumber(n), name = name, id = tonumber(id) }
+    rest = rest:gsub('^ %- ', '')
+    for part in (rest .. ' | '):gmatch('(.-) | ') do
+        local k, v = part:match('^(%a+): (.+)$')
+        if k == 'Power' then e.power = tonumber(v)
+        elseif k == 'SubPower' then e.sub = tonumber(v)
+        elseif k == 'Time' then e.time = v
+        elseif k == 'Tick' then e.tick = v
+        elseif part:match('^%[.+%]$') then e.flags = part:sub(2, -2) end
+    end
+    return e
+end
+
+-- The effects in answers `lines`: a list (empty when the server said there are none), or nil when the answers hold
+-- no listing (an error, "Player X not found", or none came).
+function replies.effects(lines)
+    local out, listed = {}, false
+    for _, l in ipairs(lines or {}) do
+        local e = replies.effect(l)
+        if e then out[#out + 1] = e listed = true
+        elseif l:find(' has no active effects%.$') then listed = true end
+    end
+    return listed and out or nil
 end
 
 -- The answers kept for history entry `entry` (its batch's, under the batch's newest line), or nil.

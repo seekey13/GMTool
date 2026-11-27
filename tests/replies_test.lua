@@ -71,3 +71,19 @@ test('a position as !pos prints it', function ()
         { name = 'Kupipi', x = 1.234, y = -3, z = 100.5, zone = 230 })
     eq(replies.position('Target ID: 5'), nil)
 end)
+
+test('a status effect as !geteffects lists it', function ()
+    eq(replies.effect('[2] PROTECT (40) - Power: 50 | Time: 29m 50s | [Dispelable]'),
+        { n = 2, name = 'PROTECT', id = 40, power = 50, time = '29m 50s', flags = 'Dispelable' })
+    eq(replies.effect('[1] FOOD (251) - Power: 1 | SubPower: 3 | Time: 1h 2m 3s | Tick: 3s | [Food,Dispelable]'),
+        { n = 1, name = 'FOOD', id = 251, power = 1, sub = 3, time = '1h 2m 3s', tick = '3s', flags = 'Food,Dispelable' })
+    eq(replies.effect('[3] Unknown Effect (999)'), { n = 3, name = 'Unknown Effect', id = 999 }, 'no details, a name with a space')
+    eq(replies.effect('Kupipi\'s position: X 1'), nil)
+end)
+
+test('a listing: its effects, none, or no listing at all', function ()
+    eq(#replies.effects({ '[1] PROTECT (40) - Power: 50', 'something else', '[2] SHELL (41)' }), 2)
+    eq(replies.effects({ 'Kupipi has no active effects.' }), {}, 'none')
+    eq(replies.effects({ 'Player Zeid not found. For mobs, target them...' }), nil, 'not a listing')
+    eq(replies.effects(nil), nil)
+end)

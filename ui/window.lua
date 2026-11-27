@@ -1240,6 +1240,76 @@ local function action_grid(pg, list, prefix, sent)
     end
 end
 
+-- Status effects ----------------------------------------------------------------------------------------------
+-- The newest answer to `!geteffects <arg>` (a player's name, or a mob's server id) this session, as rows. For a
+-- player (`who`) each has Remove: !deleffect, then the list again, so it stays current.
+
+-- The newest history entry for `line` (any case), or nil.
+local function listing(line)
+    local low = line:lower()
+    for _, e in ipairs(view.cfg.history or {}) do
+        if e.line:lower() == low then return e end
+    end
+end
+
+local function effects_panel(pg, arg, who)
+    local list_line = '!geteffects ' .. arg
+    local e = listing(list_line)
+    local said = e and replies.of(e)
+    local list = said and replies.effects(said)
+    subheader(pg, 'Status effects')
+    local hcy = pg.y - S(14)  -- the heading's middle
+    local label = said and 'Refresh' or 'List them'
+    local x = pg.right - kit.button_width(label)
+    if kit.button('##gm_fx_list_' .. arg, x, hcy, label, 'ghost') then act.send(list_line, { cursor = false }) end
+    kit.tip('Ask the server: ' .. list_line)
+    if who and list and #list > 0 then
+        local lines = {}
+        for _, fx in ipairs(list) do lines[#lines + 1] = ('!deleffect %s %d'):format(who, fx.id) end
+        lines[#lines + 1] = list_line
+        if guarded('##gm_fx_all_' .. arg, x - S(6), hcy, 'Remove all', 'ghost', true, true) then
+            act.send_lines(lines, 'Remove all effects')
+        end
+        kit.tip(('Remove every effect from %s (food, buffs, and the rest), then list them again'):format(who))
+    end
+    if not said then
+        local waiting = e and e.t and view.time and view.time - e.t <= 3
+        note(pg, waiting and 'Waiting for the server...' or 'Not listed yet this session: List them asks the server.', P.dim)
+        return
+    end
+    if not list then note(pg, said[1] or '', P.amber) return end  -- "Player X not found", or an error
+    if #list == 0 then note(pg, 'No effects.', P.dim) return end
+    note(pg, ('%d effect%s, listed %s ago.'):format(#list, #list == 1 and '' or 's',
+        util.ago((view.time or 0) - (e.t or view.time or 0))), P.dim)
+    local d = pg.dl
+    for _, fx in ipairs(list) do
+        local y = pg.y
+        local lcy = line(pg, nil)
+        if y < pg.bottom and y + S(ROW_H) > pg.top then
+            local nx = pg.lx
+            kit.text_mid(d, nx, lcy, kit.fit(util.pretty(fx.name), S(150), kit.fonts.text, S(BODY - 1)), P.white, kit.fonts.text,
+                S(BODY - 1))
+            local bits = { '#' .. fx.id }
+            if fx.power then bits[#bits + 1] = 'power ' .. fx.power end
+            if fx.sub then bits[#bits + 1] = 'sub ' .. fx.sub end
+            bits[#bits + 1] = fx.time or 'no time limit'
+            if fx.flags then bits[#bits + 1] = fx.flags:lower():gsub(',', ', ') end
+            local right = pg.right
+            if who then
+                local rw = kit.button_width('Remove')
+                right = pg.right - rw - S(8)
+                if kit.button(('##gm_fx_del_%s_%d_%d'):format(arg, fx.n, fx.id), pg.right - rw, lcy, 'Remove', 'ghost') then
+                    act.send_lines({ ('!deleffect %s %d'):format(who, fx.id), list_line }, 'Remove ' .. util.pretty(fx.name))
+                end
+                kit.tip(('!deleffect %s %d, then list them again'):format(who, fx.id))
+            end
+            local ix = nx + S(160)
+            kit.text_mid(d, ix, lcy, kit.fit(table.concat(bits, '  \194\183  '), right - ix, kit.fonts.text, S(SMALL)), P.dim,
+                kit.fonts.text, S(SMALL))
+        end
+    end
+end
+
 local function target_page(pg)
     local t = view.target
     if not t then
@@ -1277,6 +1347,8 @@ local function target_page(pg)
     kit.text_right(d, pg.right, y + S(19), heard, view.ready and P.teal or P.amber, kit.fonts.text, S(SMALL - 1))
     pg.y = y + h + S(4)
     action_grid(pg, actions.for_target(t, view.me and view.me.name), ('tact_%s_%d'):format(t.kind, t.index or 0))
+    if t.kind == 'pc' then effects_panel(pg, t.name, t.name)
+    elseif t.kind == 'mob' and t.sid then effects_panel(pg, tostring(t.sid), nil) end
 end
 
 -- Players -----------------------------------------------------------------------------------------------------
@@ -1348,6 +1420,7 @@ local function players_page(pg)
             if not a.cursor or seen.targeted then list[#list + 1] = a end
         end
         action_grid(pg, list, 'pact', function () store.name_used(name) end)
+        effects_panel(pg, name, name)
     end
     -- the names GM Tool knows
     subheader(pg, 'Players you know')
