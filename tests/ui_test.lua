@@ -918,3 +918,52 @@ test('history: a filter, and Copy puts the lines shown on the clipboard as a dat
     window.state.hist_q = nil
     replies.reset()
 end)
+
+test('favorites: up and down reorder them, here and on the GM Bar', function ()
+    fresh()
+    store.toggle_favorite('hp')
+    store.toggle_favorite('mp')
+    store.toggle_favorite('tp')
+    window.state.page = 'favorites'
+    frame({ ['##gm_fav_down_hp'] = true })
+    eq(store.cfg.favorites, { 'mp', 'hp', 'tp' })
+    frame({ ['##gm_fav_up_tp'] = true })
+    eq(store.cfg.favorites, { 'mp', 'tp', 'hp' })
+    frame({ ['##gm_fav_up_mp'] = true })
+    eq(store.cfg.favorites, { 'mp', 'tp', 'hp' }, 'the first stays first')
+    frame({ ['##gm_fav_down_hp'] = true })
+    eq(store.cfg.favorites, { 'mp', 'tp', 'hp' }, 'the last stays last')
+    window.state.page = 'vitals'
+    frame()
+    eq(fake.current.ids['GM Tool###gmtool|##gm_fav_up_hp'], nil, 'arrows on the Favorites page only')
+end)
+
+test('the GM Bar wraps when it would run off the screen', function ()
+    fresh()
+    for _, c in ipairs(catalog.list) do
+        if c.page == 'vitals' or c.page == 'jobs' or c.page == 'abilities' then store.toggle_favorite(c.key) end
+    end
+    assert(#store.cfg.favorites > 25, 'a long bar')
+    store.cfg.ui.bar, store.cfg.ui.open = true, false
+    local size
+    rawset(fake.imgui, 'Dummy', function (sz) size = sz end)
+    frame()
+    rawset(fake.imgui, 'Dummy', nil)
+    assert(size[1] <= 1920 * 0.8, 'within the screen: ' .. size[1])
+    assert(size[2] >= 2 * kit.S(34), 'on more than one row: ' .. size[2])
+    store.cfg.ui.bar, store.cfg.ui.open = false, true
+end)
+
+test('history: the filter goes when the history is cleared', function ()
+    fresh()
+    store.remember('!where', 1000)
+    window.state.page, window.state.hist_q = 'history', { 'nothing like it' }
+    frame()
+    assert(fake.drew('No line sent matches.'), 'filtered out')
+    store.cfg.history = {}
+    frame()
+    eq(window.state.hist_q, nil)
+    store.remember('!where', 1001)
+    frame()
+    assert(fake.drew('!where'), 'the next line shows')
+end)

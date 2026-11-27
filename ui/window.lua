@@ -529,6 +529,25 @@ local function card_head(pg, c, tag)
     kit.tip(fav and 'Remove from Favorites' or 'Add to Favorites')
     if sclick then store.toggle_favorite(c.key) end
     local text_right = scx - S(14)
+    -- on the Favorites page: up and down, the order the page and the GM Bar keep
+    if pg.move and fav then
+        local f = view.cfg.favorites
+        local at = 0
+        for k, key in ipairs(f) do if key == c.key then at = k end end
+        local function arrow(id, cx, up, enabled)
+            local hit_ = icon_button(id, cx, cy, S(18), function (col)
+                local w, hgt = S(4), S(2.5)
+                local dy = up and hgt or -hgt
+                kit.line(d, cx - w, cy + dy, cx, cy - dy, enabled and col or P.line, a, math.max(1, S(1.4)))
+                kit.line(d, cx, cy - dy, cx + w, cy + dy, enabled and col or P.line, a, math.max(1, S(1.4)))
+            end, P.faint, P.teal)
+            kit.tip(up and 'Move up (here and on the GM Bar)' or 'Move down')
+            return hit_ and enabled
+        end
+        if arrow('##gm_fav_up_' .. c.key, scx - S(22), true, at > 1) then store.move_favorite(c.key, -1) end
+        if arrow('##gm_fav_down_' .. c.key, scx - S(40), false, at > 0 and at < #f) then store.move_favorite(c.key, 1) end
+        text_right = scx - S(52)
+    end
     -- left: chevron and title, a click folds
     local has_form = #c.args > 0 or c.note or c.presets
     local title_px = S(BODY)
@@ -788,10 +807,12 @@ local function favorites_page(pg)
         kit.tip(table.concat(SUGGESTED, ', '))
         return
     end
+    pg.move = true
     for _, c in ipairs(list) do
         local p = catalog.page_of[c.page]
         card(pg, c, p and p.title)
     end
+    pg.move = nil
 end
 
 local function commands_page(pg, id)
@@ -876,7 +897,7 @@ local function history_log(list)
     local out = {}
     for k = #list, 1, -1 do
         local e = list[k]
-        out[#out + 1] = (e.t and os.date('%Y-%m-%d %H:%M:%S', e.t) or '') .. '  ' .. e.line
+        out[#out + 1] = (tonumber(e.t) and os.date('%Y-%m-%d %H:%M:%S', e.t) or '(no date)          ') .. '  ' .. e.line
         for _, said in ipairs(replies.of(e) or {}) do out[#out + 1] = '        ' .. said end
     end
     return table.concat(out, '\n')
@@ -884,7 +905,11 @@ end
 
 local function history_page(pg)
     local h = view.cfg.history
-    if #h == 0 then note(pg, 'Nothing sent yet. Every line GM Tool sends is kept here, newest first.', P.text2) return end
+    if #h == 0 then
+        state.hist_q = nil  -- a filter goes with what it filtered
+        note(pg, 'Nothing sent yet. Every line GM Tool sends is kept here, newest first.', P.text2)
+        return
+    end
     local cy = pg.y + S(14)
     pg.y = pg.y + S(30)
     local clicked, clear_w = guarded('##gm_hist_clear', pg.lx, cy, 'Clear history', 'danger')
@@ -1101,7 +1126,7 @@ end
 local function paste_shared()
     local text = imgui.GetClipboardText()
     if type(text) ~= 'string' or util.trim(text) == '' then return act.toast('The clipboard is empty.', 'error') end
-    local ms, ps, bad = macros.import(text)
+    local ms, ps, bad = macros.import(text:sub(1, 200000))
     local first = bad[1] and (' (line %d: %s)'):format(bad[1][1], bad[1][2]) or ''
     if #ms == 0 and #ps == 0 then return act.toast('No macros or places on the clipboard' .. first .. '.', 'error') end
     local am, sm = macros.merge(view.cfg.macros, ms, macros.same_macro)
@@ -2284,76 +2309,83 @@ local function bar_body()
     local x0, y0 = imgui.GetCursorScreenPos()
     local pad, gap, h = S(6), S(5), S(34)
     local list = commands_of('favorites')
-    local items = { { label = 'GM', lead = true } }
-    for _, c in ipairs(list) do items[#items + 1] = { label = c.title, c = c } end
+    local items = { { label = 'GM', lead = true, id = '##gmbar_open' } }
+    for _, c in ipairs(list) do items[#items + 1] = { label = c.title, c = c, id = '##gmbar_' .. c.key } end
     for _, m in ipairs(view.cfg.macros or {}) do
-        if m.bar then items[#items + 1] = { label = kit.fit(util.trim(m.name) ~= '' and m.name or 'Macro', S(140), kit.fonts.text, S(BODY - 1)), macro = m } end
+        if m.bar then
+            items[#items + 1] = { label = kit.fit(util.trim(m.name) ~= '' and m.name or 'Macro', S(140), kit.fonts.text, S(BODY - 1)),
+                                  macro = m, id = '##gmbar_mac_' .. uid_of(m) }
+        end
     end
     for _, p in ipairs(view.cfg.places or {}) do
-        if p.bar then items[#items + 1] = { label = kit.fit(util.trim(p.name) ~= '' and p.name or 'Place', S(140), kit.fonts.text, S(BODY - 1)), place = p } end
+        if p.bar then
+            items[#items + 1] = { label = kit.fit(util.trim(p.name) ~= '' and p.name or 'Place', S(140), kit.fonts.text, S(BODY - 1)),
+                                  place = p, id = '##gmbar_place_' .. uid_of(p) }
+        end
     end
-    local total = pad
-    for _, it in ipairs(items) do
+    -- where each goes: an armed one as wide as it then is; a row wraps at most of the screen's width
+    local armed_w = kit.button_width('Sure? Click again')
+    local max_w = math.max(S(300), (kit.screen()) * 0.8)
+    local x, row, width = pad, 0, 0
+    for k, it in ipairs(items) do
         it.w = kit.button_width(it.label)
-        total = total + it.w + gap
+        if state.armed[it.id] and view.now - state.armed[it.id] < ARMED then it.w = math.max(it.w, armed_w) end
+        if k > 1 and x + it.w + pad > max_w then x, row = pad, row + 1 end
+        it.x, it.row = x, row
+        x = x + it.w + gap
+        width = math.max(width, x - gap + pad)
     end
     local hint = #items == 1 and 'Star commands, macros or places to put them here' or nil
-    if hint then total = total + kit.measure(hint, kit.fonts.text, S(SMALL)) + gap end
-    total = total - gap + pad
+    if hint then width = width + kit.measure(hint, kit.fonts.text, S(SMALL)) + gap end
+    local height = (row + 1) * h
     local d = dl()
-    kit.fill(d, x0, y0, total, h, P.bg, S(6), 0.94)
-    kit.outline(d, x0, y0, total, h, P.border, S(6))
-    local x, cy = x0 + pad, y0 + h / 2
+    kit.fill(d, x0, y0, width, height, P.bg, S(6), 0.94)
+    kit.outline(d, x0, y0, width, height, P.border, S(6))
     for _, it in ipairs(items) do
+        local bx, cy = x0 + it.x, y0 + it.row * h + h / 2
         if it.lead then
             local open = view.cfg.ui.open ~= false
-            if kit.button('##gmbar_open', x, cy, it.label, open and 'accent' or 'ghost') then
+            if kit.button(it.id, bx, cy, it.label, open and 'accent' or 'ghost') then
                 view.cfg.ui.open = not open
                 store.dirty()
             end
             kit.tip(open and 'Close GM Tool' or 'Open GM Tool')
-            x = x + it.w + gap
         elseif it.macro then
             local m = it.macro
             local lines, why, fans = macros.lines(m, ctx())
             fans = lines and fans
-            local id = '##gmbar_mac_' .. uid_of(m)
-            local clicked, w
-            if why == true then clicked, w = guarded(id, x, cy, it.label, 'danger')
-            elseif fans then clicked, w = guarded(id, x, cy, it.label, 'ghost')
-            else clicked, w = kit.button(id, x, cy, it.label, 'ghost') end
+            local clicked
+            if why == true then clicked = guarded(it.id, bx, cy, it.label, 'danger')
+            elseif fans then clicked = guarded(it.id, bx, cy, it.label, 'ghost')
+            else clicked = kit.button(it.id, bx, cy, it.label, 'ghost') end
             kit.tip(lines and ('Macro: ' .. sends_tip(lines)) or ('Macro: can\'t run now (' .. tostring(why) .. ')'))
             if clicked then
                 if lines then act.send_lines(lines, m.name)
                 else act.toast(('%s: %s'):format(m.name, why), 'error') end
             end
-            x = x + math.max(w or it.w, it.w) + gap
         elseif it.place then
             local p = it.place
             local line_ = macros.place_line(p, nil, view.me and view.me.zone)
-            local clicked, w = kit.button('##gmbar_place_' .. uid_of(p), x, cy, it.label, 'ghost')
+            local clicked = kit.button(it.id, bx, cy, it.label, 'ghost')
             kit.tip(('Place: put yourself at %s\n%s'):format(p.name, line_))
             if clicked then act.send(line_, { cursor = false }) end
-            x = x + math.max(w or it.w, it.w) + gap
         else
             local c = it.c
             local values = store.form(c.key)
             local lines, why = build.lines(c, values, ctx())
-            local id = '##gmbar_' .. c.key
-            local clicked, w
-            if c.danger then clicked, w = guarded(id, x, cy, it.label, 'danger')
-            elseif lines and #lines > 1 then clicked, w = guarded(id, x, cy, it.label, 'ghost')
-            else clicked, w = kit.button(id, x, cy, it.label, 'ghost') end
+            local clicked
+            if c.danger then clicked = guarded(it.id, bx, cy, it.label, 'danger')
+            elseif lines and #lines > 1 then clicked = guarded(it.id, bx, cy, it.label, 'ghost')
+            else clicked = kit.button(it.id, bx, cy, it.label, 'ghost') end
             kit.tip(lines and sends_tip(lines) or ('Can\'t send yet (' .. tostring(why) .. '): a click opens its form'))
             if clicked then
                 if lines then send_card(c, values) else open_card(c) end
             end
-            x = x + math.max(w or it.w, it.w) + gap
         end
     end
-    if hint then kit.text_mid(d, x, cy, hint, P.dim, kit.fonts.text, S(SMALL)) end
+    if hint then kit.text_mid(d, x0 + x, y0 + h / 2, hint, P.dim, kit.fonts.text, S(SMALL)) end
     imgui.SetCursorScreenPos({ x0, y0 })
-    imgui.Dummy({ total, h })  -- the strip's size, for the auto-size
+    imgui.Dummy({ width, height })  -- the strip's size, for the auto-size
 end
 
 local function bar_window()
