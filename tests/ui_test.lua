@@ -967,3 +967,52 @@ test('history: the filter goes when the history is cleared', function ()
     frame()
     assert(fake.drew('!where'), 'the next line shows')
 end)
+
+test('effects: Remove waits while a newer list is on its way', function ()
+    fresh()
+    local replies = require('core.replies')
+    replies.reset()
+    window.state.page, window.state.pl = 'players', { name = { 'Trion' } }
+    store.remember('!geteffects Trion', 990)
+    replies.sent(store.cfg.history[1], 0)
+    replies.text('[1] PROTECT (40) - Power: 50', 0.1)
+    store.remember('!where', 995)
+    store.remember('!geteffects Trion', 999)  -- asked again a second ago: no answer yet
+    frame(nil, { target = false })
+    assert(fake.drew('Updating...'), 'says so')
+    frame({ ['##gm_fx_del_Trion_1_40'] = true }, { target = false })
+    eq(#calls.lines, 0, 'the row may be another by the time the list comes')
+    replies.reset()
+    window.state.pl = nil
+end)
+
+test('leaving a page disarms what was armed on it', function ()
+    fresh()
+    store.cfg.acting.mode = 'party'
+    window.state.page = 'vitals'
+    window.state.open.hp = true
+    frame({ ['##gm_pre_hp_2'] = true })
+    eq(#calls.lines, 0, 'armed')
+    window.state.page = 'jobs'
+    frame()
+    window.state.page = 'vitals'
+    frame({ ['##gm_pre_hp_2'] = true })
+    eq(#calls.lines, 0, 'armed afresh, not sent')
+    store.cfg.acting.mode = 'target'
+end)
+
+test('the GM Bar: arming a button never moves the others', function ()
+    fresh()
+    store.toggle_favorite('jail')
+    store.toggle_favorite('where')
+    store.cfg.ui.bar, store.cfg.ui.open = true, false
+    local size
+    rawset(fake.imgui, 'Dummy', function (sz) size = sz end)
+    frame()
+    local before = size[1]
+    frame({ ['##gmbar_jail'] = true })
+    frame()
+    eq(size[1], before, 'the same width armed')
+    rawset(fake.imgui, 'Dummy', nil)
+    store.cfg.ui.bar, store.cfg.ui.open = false, true
+end)

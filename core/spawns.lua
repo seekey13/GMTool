@@ -111,7 +111,8 @@ end
 -- Every zone, for a search of them all: parsed a few a frame (spawns.step), so a search never stalls the game.
 local every = { zones = nil, next = 1 }
 
--- Parses up to `budget` more zones for spawns.search. Returns whether every zone is: done, and how many are.
+-- Parses up to `budget` more zones for spawns.search, for 4 ms at most (a big zone takes a few). Returns whether
+-- every zone is: done, and how many are.
 function spawns.step(budget)
     if not every.zones then
         every.zones = {}
@@ -119,15 +120,29 @@ function spawns.step(budget)
         table.sort(every.zones)
     end
     local stop = math.min(#every.zones, every.next + (budget or 30) - 1)
-    for k = every.next, stop do spawns.zone(every.zones[k]) end
-    every.next = stop + 1
+    local t0 = os.clock()
+    for k = every.next, stop do
+        spawns.zone(every.zones[k])
+        every.next = k + 1
+        if os.clock() - t0 > 0.004 then break end
+    end
     return every.next > #every.zones, every.next - 1, #every.zones
 end
 
 -- The entries of every zone parsed so far that spawns.filter keeps, by zone then id, at most `limit` (200);
 -- and whether there were more.
+local last_search  -- { key, out, more }: a page asks each frame, the same till the query or the index moves
+
 function spawns.search(kind, q, limit)
     limit = limit or 200
+    local key = table.concat({ kind, tostring(q), limit, every.next }, '|')
+    if last_search and last_search.key == key then return last_search.out, last_search.more end
+    local out, more = spawns.search_now(kind, q, limit)
+    last_search = { key = key, out = out, more = more }
+    return out, more
+end
+
+function spawns.search_now(kind, q, limit)
     local out = {}
     for k = 1, every.next - 1 do
         for _, e in ipairs(spawns.filter(spawns.zone(every.zones[k]), kind, q)) do
@@ -139,7 +154,7 @@ function spawns.search(kind, q, limit)
 end
 
 -- Forget what was parsed (the tests' new source).
-function spawns.reset() parsed, by_id, every = {}, {}, { zones = nil, next = 1 } end
+function spawns.reset() parsed, by_id, every, last_search = {}, {}, { zones = nil, next = 1 }, nil end
 
 -- How many mobs, NMs and NPCs `list` holds: counted by id, not by row.
 function spawns.counts(list)

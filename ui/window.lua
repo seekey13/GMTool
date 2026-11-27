@@ -1413,11 +1413,11 @@ local function listing(l)
     local newest
     for _, e in ipairs(view.cfg.history or {}) do
         if e.line:lower() == low then
-            if replies.of(e) then return e end
+            if replies.of(e) then return e, newest or e end
             newest = newest or e
         end
     end
-    return newest
+    return newest, newest
 end
 
 -- What Remove all leaves: effects that hold a battle's or an area's state, not a buff (by name, data/effects.lua).
@@ -1426,9 +1426,11 @@ local KEEP = { KO = true, LEVEL_RESTRICTION = true, BATTLEFIELD = true, CONFRONT
 
 local function effects_panel(pg, arg, who)
     local list_line = '!geteffects ' .. arg
-    local e = listing(list_line)
+    local e, newest = listing(list_line)
     local said = e and replies.of(e)
     local list = said and replies.effects(said)
+    -- a newer list asked for and not here yet: the rows are about to change, so nothing removes till they have
+    local fresh = newest == e or not (newest and newest.t and view.time and view.time - newest.t <= 3)
     subheader(pg, 'Status effects')
     local hcy = pg.y - S(14)  -- the heading's middle
     local label = said and 'Refresh' or 'List them'
@@ -1443,7 +1445,7 @@ local function effects_panel(pg, arg, who)
         end
         if #lines > 0 then
             lines[#lines + 1] = list_line
-            if guarded('##gm_fx_all_' .. arg, x - S(6), hcy, 'Remove all', 'ghost', true, true) then
+            if guarded('##gm_fx_all_' .. arg, x - S(6), hcy, 'Remove all', 'ghost', fresh, true) then
                 act.send_lines(lines, 'Remove all effects')
             end
             kit.tip(('Remove every effect from %s (food, buffs, and the rest), then list them again.%s'):format(who,
@@ -1457,8 +1459,8 @@ local function effects_panel(pg, arg, who)
     end
     if not list then note(pg, said[1] or '', P.amber) return end  -- "Player X not found", or an error
     if #list == 0 then note(pg, 'No effects.', P.dim) return end
-    note(pg, ('%d effect%s, listed %s ago.'):format(#list, #list == 1 and '' or 's',
-        util.ago((view.time or 0) - (e.t or view.time or 0))), P.dim)
+    note(pg, ('%d effect%s, listed %s ago.%s'):format(#list, #list == 1 and '' or 's',
+        util.ago((view.time or 0) - (e.t or view.time or 0)), fresh and '' or ' Updating...'), P.dim)
     local d = pg.dl
     for _, fx in ipairs(list) do
         local y = pg.y
@@ -1476,7 +1478,7 @@ local function effects_panel(pg, arg, who)
             if who then
                 local rw = kit.button_width('Remove')
                 right = pg.right - rw - S(8)
-                if kit.button(('##gm_fx_del_%s_%d_%d'):format(arg, fx.n, fx.id), pg.right - rw, lcy, 'Remove', 'ghost') then
+                if kit.button(('##gm_fx_del_%s_%d_%d'):format(arg, fx.n, fx.id), pg.right - rw, lcy, 'Remove', 'ghost', fresh) then
                     act.send_lines({ ('!deleffect %s %d'):format(who, fx.id), list_line }, 'Remove ' .. util.pretty(fx.name))
                 end
                 kit.tip(('!deleffect %s %d, then list them again (of several with this id, the server removes the first)')
@@ -1854,8 +1856,12 @@ local function zones_page(pg)
         note(pg, 'The server\'s database has no mobs or NPCs in this zone.', P.dim)
         return
     end
-    local list = spawns.filter(all, ZB_KINDS[zb.kind][1], util.trim(zb.q[1]))
-    local c = spawns.counts(all)
+    local key = table.concat({ zone, ZB_KINDS[zb.kind][1], util.trim(zb.q[1]) }, '|')
+    if not zb.cache or zb.cache.key ~= key or zb.cache.all ~= all then
+        zb.cache = { key = key, all = all, list = spawns.filter(all, ZB_KINDS[zb.kind][1], util.trim(zb.q[1])),
+                     counts = spawns.counts(all) }
+    end
+    local list, c = zb.cache.list, zb.cache.counts
     local function plural(n, s) return ('%d %s%s'):format(n, s, n == 1 and '' or 's') end
     note(pg, ('%s, %s and %s in the server\'s database.%s'):format(plural(c.nm, 'NM'), plural(c.mob, 'mob'),
         plural(c.npc, 'NPC'), here and '' or ' Go to zones you there; Bring is for your own zone.'), P.dim)
@@ -2323,13 +2329,27 @@ local function bar_body()
                                   place = p, id = '##gmbar_place_' .. uid_of(p) }
         end
     end
-    -- where each goes: an armed one as wide as it then is; a row wraps at most of the screen's width
+    -- what each sends, once a frame (one context for all), and whether it asks twice
+    local c_ = ctx()
+    for _, it in ipairs(items) do
+        if it.macro then
+            local lines, why, fans = macros.lines(it.macro, c_)
+            it.lines, it.why = lines, why
+            it.guard = why == true and 'danger' or (lines and fans) and 'ghost' or nil
+        elseif it.c then
+            it.values = store.form(it.c.key)
+            it.lines, it.why = build.lines(it.c, it.values, c_)
+            it.guard = it.c.danger and 'danger' or (it.lines and #it.lines > 1) and 'ghost' or nil
+        end
+    end
+    -- where each goes: one that asks twice as wide as it is armed ("Sure? Click again"), so arming one never moves
+    -- another under the pointer; a row wraps at most of the screen's width
     local armed_w = kit.button_width('Sure? Click again')
     local max_w = math.max(S(300), (kit.screen()) * 0.8)
     local x, row, width = pad, 0, 0
     for k, it in ipairs(items) do
         it.w = kit.button_width(it.label)
-        if state.armed[it.id] and view.now - state.armed[it.id] < ARMED then it.w = math.max(it.w, armed_w) end
+        if it.guard then it.w = math.max(it.w, armed_w) end
         if k > 1 and x + it.w + pad > max_w then x, row = pad, row + 1 end
         it.x, it.row = x, row
         x = x + it.w + gap
@@ -2351,12 +2371,9 @@ local function bar_body()
             end
             kit.tip(open and 'Close GM Tool' or 'Open GM Tool')
         elseif it.macro then
-            local m = it.macro
-            local lines, why, fans = macros.lines(m, ctx())
-            fans = lines and fans
+            local m, lines, why = it.macro, it.lines, it.why
             local clicked
-            if why == true then clicked = guarded(it.id, bx, cy, it.label, 'danger')
-            elseif fans then clicked = guarded(it.id, bx, cy, it.label, 'ghost')
+            if it.guard then clicked = guarded(it.id, bx, cy, it.label, it.guard)
             else clicked = kit.button(it.id, bx, cy, it.label, 'ghost') end
             kit.tip(lines and ('Macro: ' .. sends_tip(lines)) or ('Macro: can\'t run now (' .. tostring(why) .. ')'))
             if clicked then
@@ -2370,12 +2387,9 @@ local function bar_body()
             kit.tip(('Place: put yourself at %s\n%s'):format(p.name, line_))
             if clicked then act.send(line_, { cursor = false }) end
         else
-            local c = it.c
-            local values = store.form(c.key)
-            local lines, why = build.lines(c, values, ctx())
+            local c, values, lines, why = it.c, it.values, it.lines, it.why
             local clicked
-            if c.danger then clicked = guarded(it.id, bx, cy, it.label, 'danger')
-            elseif lines and #lines > 1 then clicked = guarded(it.id, bx, cy, it.label, 'ghost')
+            if it.guard then clicked = guarded(it.id, bx, cy, it.label, it.guard)
             else clicked = kit.button(it.id, bx, cy, it.label, 'ghost') end
             kit.tip(lines and sends_tip(lines) or ('Can\'t send yet (' .. tostring(why) .. '): a click opens its form'))
             if clicked then
@@ -2413,6 +2427,8 @@ function window.render(view_, act_)
     -- whatever was armed was for the target you had: another (or none) disarms it all
     local tindex = view.target and view.target.index or 0
     if tindex ~= state.target_index then state.armed, state.target_index = {}, tindex end
+    -- and what was armed on a page is for that page: leaving it disarms (a preset chip shows no "Sure?")
+    if state.page ~= state.armed_page then state.armed, state.armed_page = {}, state.page end
     local err
     if view.cfg.ui.open ~= false then err = main_window() end
     if view.cfg.ui.bar then err = bar_window() or err end
