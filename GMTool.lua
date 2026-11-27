@@ -180,7 +180,9 @@ end)
 -- What a macro or place needs to know, as the window's: you, your target, Acting on, where you stand.
 local function context()
     local me, a = game.me(), store.cfg.acting
-    return { me = me and me.name, target = game.target(), mode = a.mode, name = a.name,
+    local party = { me and me.name or nil }
+    for _, p in ipairs(game.players()) do if p.party then party[#party + 1] = p.name end end
+    return { me = me and me.name, target = game.target(), mode = a.mode, name = a.name, party = party,
              pos = me and me.x and { x = me.x, y = me.y, z = me.z } or nil, zone = me and me.zone }
 end
 

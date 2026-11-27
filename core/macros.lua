@@ -36,6 +36,7 @@ local function value(word, ctx)
     elseif word == 'who' then
         local mode = ctx.mode or 'target'
         if mode == 'none' then return nil, 'Acting on: None names no one: use {me}, or pick a mode' end
+        if mode == 'party' then return nil, 'Acting on: Party: run the macro (each member gets its {who} lines)' end
         if mode == 'me' then return ctx.me or nil, 'you aren\'t logged in' end
         if mode == 'name' then
             local n = util.trim(ctx.name)
@@ -86,23 +87,60 @@ function macros.risky(line)
     return false
 end
 
--- Every line of macro `m` expanded: the lines and whether any is risky (its Run asks twice, and /gmt macro won't
--- run it); or nil, why and the line it failed on (from 1). A risky command never takes its name from {who} or
--- {target}: the macro must spell it.
-function macros.lines(m, ctx)
+local function has_who(l) return l:lower():find('{who}', 1, true) ~= nil end
+
+-- The lines of `m` that `keep(l)` keeps (every one, for none), expanded: lines, risky; or nil, why, line number.
+local function expand_all(m, ctx, keep)
     local out, risky = {}, false
     for i, l in ipairs(m.lines or {}) do
         if util.trim(l) ~= '' then
             if macros.risky(util.trim(l)) then
                 risky = true
-                if l:lower():find('{who}', 1, true) or l:lower():find('{target}', 1, true) then
+                if has_who(l) or l:lower():find('{target}', 1, true) then
                     return nil, ('line %d: a risky command never takes its name from {who} or {target}: type it'):format(i), i
                 end
             end
-            local line, why = macros.expand(l, ctx)
-            if not line then return nil, ('line %d: %s'):format(i, why), i end
-            out[#out + 1] = line
+            if not keep or keep(l) then
+                local line, why = macros.expand(l, ctx)
+                if not line then return nil, ('line %d: %s'):format(i, why), i end
+                out[#out + 1] = line
+            end
         end
+    end
+    return out, risky
+end
+
+-- Every line of macro `m` expanded: the lines and whether any is risky (its Run asks twice, and /gmt macro won't
+-- run it); or nil, why and the line it failed on (from 1). A risky command never takes its name from {who} or
+-- {target}: the macro must spell it.
+-- Under Acting on: Party (ctx.party: you, then your party), each member in turn gets the {who} lines, with its
+-- name; a line without {who} goes once, with the first (so a toggle, !hide, isn't flipped back), and a command
+-- that needs another player (!bring {who}) leaves you out.
+function macros.lines(m, ctx)
+    local out, risky
+    local fans = false
+    for _, l in ipairs(m.lines or {}) do if has_who(l) then fans = true end end
+    if ctx.mode == 'party' and fans then
+        if #(ctx.party or {}) == 0 then return nil, 'Acting on: Party has no one in it (log in)' end
+        out, risky = {}, false
+        local me = ctx.me and ctx.me:lower()
+        for k, n in ipairs(ctx.party) do
+            local one = {}
+            for key, v in pairs(ctx) do one[key] = v end
+            one.mode, one.name = 'name', n
+            local mine = me ~= nil and n:lower() == me
+            local lines, r, at = expand_all(m, one, function (l)
+                if not has_who(l) then return k == 1 end
+                return not (mine and build.needs_name(util.trim(l)))
+            end)
+            if not lines then return nil, ('%s (for %s)'):format(r, n), at end
+            risky = risky or r
+            for _, x in ipairs(lines) do out[#out + 1] = x end
+        end
+    else
+        local at
+        out, risky, at = expand_all(m, ctx)
+        if not out then return nil, risky, at end
     end
     if #out == 0 then return nil, 'no lines' end
     return out, risky

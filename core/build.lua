@@ -11,7 +11,9 @@
                    'me'      you, by name
                    'name'    ctx.name
                    'none'    no name: the server's own default (your cursor target, or you)
+                   'party'   each of ctx.party, a line apiece (build.lines)
         name   = the name for mode 'name',
+        party  = for mode 'party': you, then your party and alliance, by name
     }
     A command that needs a name (who 'none': !goto, !giveitem...) takes it from your player target or the typed
     name, never from 'me'; a risky one (c.danger: !jail, !promote, delete inventory...) only from its own box.
@@ -56,6 +58,9 @@ function build.default_player(c, a, ctx)
         return n
     end
     if mode == 'none' then return '' end
+    if mode == 'party' then  -- a line apiece: build.lines; build.line alone never picks one of them
+        return nil, ('each of your party, a line apiece (%d)'):format(#(ctx.party or {}))
+    end
     if mode == 'target' and t and t.kind == 'pc' and t.name then return t.name end
     if a.who == 'none' then
         if mode == 'me' then return nil, 'type a name: this command needs one (Acting on: Me never names you here)' end
@@ -203,6 +208,58 @@ function build.line(c, values, ctx)
     local ok, why = build.check(line)
     if not ok then return nil, why end
     return line, info
+end
+
+-- Whether command `name` (a line's first word, '!' or not) needs another player named: a form of it has a player
+-- box that never means you (who 'none': !goto, !bring, !send...).
+function build.needs_name(name)
+    name = (tostring(name or ''):match('^!?(%S+)') or ''):lower()
+    for _, c in ipairs(require('core.catalog').list) do
+        if c.cmd == name then
+            for _, a in ipairs(c.args) do if a[2] == 'player' and a.who == 'none' then return true end end
+        end
+    end
+    return false
+end
+
+--[[ The lines command `c` sends with `values`: build.line's one, or under Acting on: Party, a line apiece for each
+     of ctx.party when a player box is empty (you left out for a command that needs another player; one name the
+     same twice, once). A risky command never takes names from Party. Returns lines, info (info.names every name
+     in them), or nil and why. ]]--
+function build.lines(c, values, ctx)
+    values, ctx = values or {}, ctx or {}
+    local empty
+    if ctx.mode == 'party' then
+        for i, a in ipairs(c.args or {}) do
+            if a[2] == 'player' and util.trim(values[i]) == '' then empty = a break end
+        end
+    end
+    if not empty then
+        local l, info = build.line(c, values, ctx)
+        if not l then return nil, info end
+        return { l }, info
+    end
+    if c.danger then return fail('%s: type the name: a risky command never takes it from Acting on', empty[1]) end
+    local me = ctx.me and ctx.me:lower()
+    local out, seen, info = {}, {}, { cursor = c.cursor ~= nil, names = {}, party = true }
+    for _, n in ipairs(ctx.party or {}) do
+        if not (empty.who == 'none' and me and n:lower() == me) then
+            local one = {}
+            for k, v in pairs(ctx) do one[k] = v end
+            one.mode, one.name = 'name', n
+            local l, why = build.line(c, values, one)
+            if not l then return fail('for %s, %s', n, why) end
+            if not seen[l] then
+                seen[l] = true
+                out[#out + 1] = l
+                info.names[#info.names + 1] = n
+            end
+        end
+    end
+    if #out == 0 then
+        return fail('%s: Acting on: Party has no one %s', empty[1], empty.who == 'none' and 'in it but you' or 'in it (log in)')
+    end
+    return out, info
 end
 
 -- Whether `line` can go as it is: ASCII, no line breaks, within MAX bytes, starting with '!'.

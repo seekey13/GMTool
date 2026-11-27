@@ -171,10 +171,18 @@ local function guarded(id, x, cy, label, kind, enabled, right)
     return false, w
 end
 
+-- You, then your party and alliance, by name: whom Acting on: Party means.
+local function party_names()
+    local out = {}
+    if view.me and view.me.name then out[1] = view.me.name end
+    for _, p in ipairs(view.players or {}) do if p.party then out[#out + 1] = p.name end end
+    return out
+end
+
 -- The context build.line takes: you, your target and the "acting on" choice.
 local function ctx()
     local a, me = view.cfg.acting, view.me
-    return { me = me and me.name, target = view.target, mode = a.mode, name = a.name,
+    return { me = me and me.name, target = view.target, mode = a.mode, name = a.name, party = party_names(),
              pos = me and me.x and { x = me.x, y = me.y, z = me.z } or nil, zone = me and me.zone }
 end
 window.ctx = ctx
@@ -266,6 +274,11 @@ end
 -- What an empty player box sends: shown as its hint.
 -- (core/build.lua's own rule, so the hint and the line never disagree.)
 local function player_hint(c, a)
+    if view.cfg.acting.mode == 'party' and not c.danger then
+        local n = #party_names()
+        if a.who == 'none' then n = n - 1 end
+        return n > 0 and ('each of your party (%d)'):format(n) or 'no one in your party'
+    end
     local d, why = build.default_player(c, a, ctx())
     if not d then return c.danger and 'type the name' or why end
     if d == '' then
@@ -431,20 +444,37 @@ end
 
 -- Cards ---------------------------------------------------------------------------------------------------------
 
--- Sends `c` with `values`: built, then handed to act. Opens the card to show why when it can't go.
+-- Sends `c` with `values`: built, then handed to act. Opens the card to show why when it can't go. Under Acting on:
+-- Party, a line apiece goes, all or none.
 local function send_card(c, values)
-    local line_, info = build.line(c, values, ctx())
-    if not line_ then
+    local lines, info = build.lines(c, values, ctx())
+    if not lines then
         state.open[c.key] = true
         act.toast(info, 'error')
         return
     end
-    act.send(line_, info)
+    if #lines == 1 then act.send(lines[1], info) else act.send_lines(lines, c.title) end
 end
 
--- The line a card would send now, for its preview: line, info or nil, why.
+-- The lines a card would send now, for its preview: lines, info or nil, why.
 local function preview(c)
-    return build.line(c, store.form(c.key), ctx())
+    return build.lines(c, store.form(c.key), ctx())
+end
+
+-- A card's lines as one to show: the first, and how many more go with it.
+local function first_of(lines)
+    if not lines then return nil end
+    if #lines == 1 then return lines[1] end
+    return ('%s  (+%d more)'):format(lines[1], #lines - 1)
+end
+
+-- Its lines for a tooltip: 'Sends ...', one a row, at most 10.
+local function sends_tip(lines)
+    if #lines == 1 then return 'Sends ' .. lines[1] end
+    local shown = {}
+    for i = 1, math.min(#lines, 10) do shown[i] = lines[i] end
+    if #lines > 10 then shown[#shown + 1] = ('and %d more'):format(#lines - 10) end
+    return ('Sends %d lines, one after another:\n'):format(#lines) .. table.concat(shown, '\n')
 end
 
 -- A card's heading: fold chevron, title, level pill, what it does; its star and Send at the right. Returns its
@@ -462,14 +492,15 @@ local function card_head(pg, c, tag)
     -- right side: Send (its tooltip the line it sends, or why it can't), then the star
     local right = pg.right
     local values = store.form(c.key)
-    local line_, why = build.line(c, values, ctx())
+    local lines, why = build.lines(c, values, ctx())
+    local line_ = first_of(lines)
     local clicked, bw
     if c.danger then
         clicked, bw = guarded('##gm_send_' .. c.key, right, cy, 'Send', 'danger', true, true)
     else
         clicked, bw = kit.button('##gm_send_' .. c.key, right - kit.button_width('Send'), cy, 'Send', 'accent')
     end
-    kit.tip(line_ and ('Sends ' .. line_) or ('Can\'t send yet: ' .. tostring(why)))
+    kit.tip(lines and sends_tip(lines) or ('Can\'t send yet: ' .. tostring(why)))
     local sx = right - bw
     if clicked then send_card(c, values) end
     local fav = store.is_favorite(c.key)
@@ -561,8 +592,9 @@ local function card_body(pg, c)
             if kit.button('##gm_more_' .. c.key, rx - mw, cy, label, 'ghost') then state.more[c.key] = not state.more[c.key] or nil end
         end
     end
-    -- the line it sends
-    local line_, info = preview(c)
+    -- the line it sends (the first of a party's, and how many more)
+    local lines, info = preview(c)
+    local line_ = first_of(lines)
     local h = S(28)
     local y = pg.y
     pg.y = pg.y + h + S(8)
@@ -575,11 +607,14 @@ local function card_body(pg, c)
     if line_ then
         local waits = info.cursor and not view.ready
         kit.text_mid(d, pg.lx, y + h / 2, kit.fit(line_, bw - S(110), kit.fonts.text, px), P.accent2, kit.fonts.text, px)
-        local tag = info.cursor and (waits and 'waits for target' or 'cursor target') or (#line_ .. ' bytes')
+        local tag = info.cursor and (waits and 'waits for target' or 'cursor target')
+            or (#lines > 1 and (#lines .. ' lines')) or (#lines[1] .. ' bytes')
         kit.text_right(d, pg.right - S(4), y + h / 2, tag, waits and P.amber or P.faint, kit.fonts.text, S(SMALL - 1))
         if info.cursor and kit.over(bx, y, bw, h) then
             kit.tooltip('Acts on your cursor target, as the server last heard it. GM Tool sends it once the server '
                 .. 'has your current target (a moment after you target something).')
+        elseif #lines > 1 and kit.over(bx, y, bw, h) then
+            kit.tooltip(sends_tip(lines))
         end
     else
         kit.text_mid(d, pg.lx, y + h / 2, kit.fit(info or '', bw - S(12), kit.fonts.text, px), P.rose, kit.fonts.text, px)
@@ -611,8 +646,11 @@ local function card(pg, c, tag)
 end
 
 -- The "acting on" strip: whom an empty player box means.
-local MODES = { { 'me', 'Me' }, { 'target', 'Target' }, { 'name', 'Name' }, { 'none', 'None' } }
+local MODES = { { 'me', 'Me' }, { 'target', 'Target' }, { 'name', 'Name' }, { 'party', 'Party' }, { 'none', 'None' } }
 local MODE_TIP = {
+    party = 'Empty player boxes send a line for each of you and your party and alliance, one after another. A command '
+        .. 'that needs another player (go to, bring...) leaves you out; a risky one still takes only the name typed '
+        .. 'in its own box. A macro runs its {who} lines for each member, and the rest once.',
     me = 'Empty player boxes send your own name.',
     target = 'Empty player boxes send your target\'s name when it\'s a player, else yours. A command that acts on the '
         .. 'cursor target takes a targeted mob or pet with no name. A command that needs a name takes only a player '
@@ -671,6 +709,13 @@ local function acting_strip(x, y, w)
     local s, color
     if a.mode == 'me' then
         s, color = view.me and view.me.name or 'you', P.white
+    elseif a.mode == 'party' then
+        local names = party_names()
+        if #names <= 1 then s, color = 'you alone: no party', P.amber
+        else
+            s, color = ('%d: %s'):format(#names, table.concat(names, ', ')), P.white
+            if kit.over(rx, y, right - rx, h) then kit.tooltip('A line apiece for:\n' .. table.concat(names, '\n')) end
+        end
     elseif a.mode == 'target' then
         local t = view.target
         if not t then s, color = 'nothing targeted', P.dim
@@ -1755,14 +1800,14 @@ local function bar_body()
         else
             local c = it.c
             local values = store.form(c.key)
-            local line_, why = build.line(c, values, ctx())
+            local lines, why = build.lines(c, values, ctx())
             local id = '##gmbar_' .. c.key
             local clicked, w
             if c.danger then clicked, w = guarded(id, x, cy, it.label, 'danger')
             else clicked, w = kit.button(id, x, cy, it.label, 'ghost') end
-            kit.tip(line_ and ('Sends ' .. line_) or ('Can\'t send yet (' .. tostring(why) .. '): a click opens its form'))
+            kit.tip(lines and sends_tip(lines) or ('Can\'t send yet (' .. tostring(why) .. '): a click opens its form'))
             if clicked then
-                if line_ then send_card(c, values) else open_card(c) end
+                if lines then send_card(c, values) else open_card(c) end
             end
             x = x + math.max(w or it.w, it.w) + gap
         end

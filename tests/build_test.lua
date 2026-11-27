@@ -266,3 +266,56 @@ test('a typed or macro line: never a mob\'s command at a player, never a cursor 
     eq(build.cursor_check('!setmoblevel 1', MOB), true)
     eq((build.cursor_check('!setmoblevel 1', PC)), false)
 end)
+
+-- Acting on: Party ---------------------------------------------------------------------------------------------
+
+local function party(target) return { me = 'Seekey', target = target, mode = 'party', party = { 'Seekey', 'Ajido', 'Trion' } } end
+
+test('party: an empty player box sends a line apiece, you first', function ()
+    local lines, info = build.lines(C.hp, { '99999' }, party(PC))
+    eq(lines, { '!hp 99999 Seekey', '!hp 99999 Ajido', '!hp 99999 Trion' })
+    eq(info.names, { 'Seekey', 'Ajido', 'Trion' })
+    eq(info.cursor, false, 'every line names its player')
+    eq(build.lines(C.raise, {}, party()), { '!raise 3 Seekey', '!raise 3 Ajido', '!raise 3 Trion' }, 'a fill before the name')
+end)
+
+test('party: a name typed in the box, or no player box, sends one line', function ()
+    eq(build.lines(C.hp, { '5', 'Kupipi' }, party()), { '!hp 5 Kupipi' }, 'typed wins')
+    eq(build.lines(C.where, {}, party()), { '!where' }, 'no player box')
+    eq(build.lines(C['hp:Mob HP'], { '0' }, party(MOB)), { '!hp 0' }, 'the mob form still reads the cursor')
+end)
+
+test('party: a command that needs another player leaves you out', function ()
+    eq(build.lines(C.bring, {}, party()), { '!bring Ajido', '!bring Trion' })
+    eq(build.lines(C.giveitem, { '', '4096' }, party()), { '!giveitem Ajido 4096' , '!giveitem Trion 4096' })
+    local none, why = build.lines(C.bring, {}, { me = 'Seekey', mode = 'party', party = { 'Seekey' } })
+    eq(none, nil)
+    assert(why:find('but you'), why)
+end)
+
+test('party: a risky command never fans out', function ()
+    local lines, why = build.lines(C.jail, {}, party())
+    eq(lines, nil)
+    assert(why:find('type the name'), why)
+    eq(build.lines(C.jail, { 'Kupipi' }, party()), { '!jail Kupipi' }, 'typed, it goes')
+end)
+
+test('party: build.line alone never picks a member', function ()
+    local l, why = build.line(C.hp, { '1' }, party())
+    eq(l, nil)
+    assert(why:find('a line apiece'), why)
+    eq(build.lines(C.hp, { '1' }, { me = 'Seekey', mode = 'party', party = {} }), nil, 'no one at all')
+end)
+
+test('party: one bad box fails every line', function ()
+    local lines, why = build.lines(C.hp, { 'lots' }, party())
+    eq(lines, nil)
+    assert(why:find('whole number'), why)
+end)
+
+test('needs_name: commands with a box that never means you', function ()
+    assert(build.needs_name('!bring Kupipi'))
+    assert(build.needs_name('goto'))
+    assert(not build.needs_name('!hp 5 Kupipi'))
+    assert(not build.needs_name('!nosuch'))
+end)

@@ -582,3 +582,25 @@ test('target page: what the database says of a targeted mob', function ()
     spawns.source = real
     spawns.reset()
 end)
+
+test('acting on: Party sends a card\'s line for each member, all at once', function ()
+    fresh()
+    window.state.page = 'vitals'
+    frame({ ['##gm_mode_party'] = true })
+    eq(store.cfg.acting.mode, 'party')
+    store.set_value('hp', 1, '99999')
+    frame()
+    assert(fake.drew('2: Seekey, Ajido'), 'the strip names whom')
+    frame({ ['##gm_send_hp'] = true })
+    eq(#calls.send, 0, 'not one by one')
+    eq(calls.lines[1].lines, { '!hp 99999 Seekey', '!hp 99999 Ajido' })
+    -- a risky one still wants a name
+    store.set_value('jail', 1, '')
+    frame({ ['##gm_send_jail'] = true })
+    frame({ ['##gm_send_jail'] = true })
+    eq(#calls.lines + #calls.send, 0, 'jail never fans out')
+    -- alone
+    frame(nil, { players = {} })
+    assert(fake.drew('you alone'), 'says so')
+    store.cfg.acting.mode = 'target'
+end)
