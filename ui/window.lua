@@ -1293,7 +1293,7 @@ local function drop_rows(pg, e, prefix, x, heading)
     local d = pg.dl
     if heading then
         subheader(pg, heading)
-        if #list == 0 then note(pg, 'None in its drop list.', P.dim) end
+        if #list == 0 then note(pg, 'None in the server\'s drop table (a script may still give some).', P.dim) end
     end
     local function row()
         local y = pg.y
@@ -1303,7 +1303,8 @@ local function drop_rows(pg, e, prefix, x, heading)
     if not heading then
         local shown, hcy = row()
         if shown then
-            kit.text_mid(d, x, hcy, #list > 0 and 'DROPS' or 'NO DROPS IN ITS LIST', P.faint, kit.fonts.semi, S(SMALL - 1.5))
+            kit.text_mid(d, x, hcy, #list > 0 and 'DROPS (BASE RATES, BEFORE TREASURE HUNTER)' or 'NO TABLE DROPS (A SCRIPT MAY GIVE SOME)',
+                P.faint, kit.fonts.semi, S(SMALL - 1.5))
         end
     end
     for j, dr in ipairs(list) do
@@ -1320,7 +1321,8 @@ local function drop_rows(pg, e, prefix, x, heading)
             if kit.button(('##gm_drop_%s_%d'):format(prefix, j), add_x, cy, 'Add', 'ghost') then
                 act.send('!additem ' .. dr.item, { cursor = false })
             end
-            kit.tip(('Put one in your inventory: !additem %d'):format(dr.item))
+            kit.tip(('Put one in your inventory: !additem %d\n(Rates are the server\'s table\'s, before Treasure Hunter and its '
+                .. 'drop rate setting.)'):format(dr.item))
         end
     end
 end
