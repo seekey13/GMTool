@@ -871,14 +871,47 @@ local function risky(l)
     return false
 end
 
+-- History lines `list` (newest first) as a log to paste: oldest first, each dated, the server's answers under it.
+local function history_log(list)
+    local out = {}
+    for k = #list, 1, -1 do
+        local e = list[k]
+        out[#out + 1] = (e.t and os.date('%Y-%m-%d %H:%M:%S', e.t) or '') .. '  ' .. e.line
+        for _, said in ipairs(replies.of(e) or {}) do out[#out + 1] = '        ' .. said end
+    end
+    return table.concat(out, '\n')
+end
+
 local function history_page(pg)
     local h = view.cfg.history
     if #h == 0 then note(pg, 'Nothing sent yet. Every line GM Tool sends is kept here, newest first.', P.text2) return end
     local cy = pg.y + S(14)
     pg.y = pg.y + S(30)
-    local clicked = guarded('##gm_hist_clear', pg.lx, cy, 'Clear history', 'danger')
+    local clicked, clear_w = guarded('##gm_hist_clear', pg.lx, cy, 'Clear history', 'danger')
     if clicked then act.clear_history() end
+    -- a filter, and the lines it shows copied as a log
+    state.hist_q = state.hist_q or { '' }
+    local q = util.trim(state.hist_q[1]):lower()
+    local matching = {}
     for _, e in ipairs(h) do
+        local hit = q == '' or e.line:lower():find(q, 1, true)
+        if not hit then
+            for _, said in ipairs(replies.of(e) or {}) do
+                if said:lower():find(q, 1, true) then hit = true break end
+            end
+        end
+        if hit then matching[#matching + 1] = e end
+    end
+    local copy_w = kit.button_width('Copy')
+    if kit.button('##gm_hist_copy', pg.right - copy_w, cy, 'Copy', 'ghost', #matching > 0) then
+        imgui.SetClipboardText(history_log(matching))
+        act.toast(('Copied %d line%s, dated, oldest first.'):format(#matching, #matching == 1 and '' or 's'))
+    end
+    kit.tip('Put the lines shown on the clipboard, dated, with what the server said back this session')
+    local fx = pg.lx + (clear_w or kit.button_width('Clear history')) + S(10)
+    kit.input('##gm_hist_q', fx, cy, pg.right - copy_w - S(10) - fx, state.hist_q, 40, 'filter: a command, a name, an answer')
+    if #matching == 0 then note(pg, 'No line sent matches.', P.dim) return end
+    for _, e in ipairs(matching) do
         local y = pg.y
         local lcy = line(pg, nil, nil)
         if y < pg.bottom and y + S(ROW_H) > pg.top then

@@ -889,3 +889,32 @@ test('the GM Bar: starred macros and places too; a risky macro asks twice there'
     eq(store.cfg.macros[1].bar, nil)
     store.cfg.ui.bar = false
 end)
+
+test('history: a filter, and Copy puts the lines shown on the clipboard as a dated log', function ()
+    fresh()
+    local replies = require('core.replies')
+    replies.reset()
+    local clip
+    rawset(fake.imgui, 'SetClipboardText', function (s) clip = s end)
+    store.remember('!getid', 1000)
+    replies.sent(store.cfg.history[1], 0)
+    replies.text('Kupipi id: 1001', 0.1)
+    store.remember('!hp 100 Ajido', 1010)
+    store.remember('!where', 1020)
+    window.state.page, window.state.hist_q = 'history', nil
+    frame()
+    frame({ ['##gm_hist_q'] = 'kupipi' })
+    frame()
+    assert(fake.drew('!getid') and not fake.drew('!where'), 'an answer matches too')
+    frame({ ['##gm_hist_copy'] = true })
+    eq(clip, os.date('%Y-%m-%d %H:%M:%S', 1000) .. '  !getid\n        Kupipi id: 1001')
+    window.state.hist_q[1] = ''
+    frame({ ['##gm_hist_copy'] = true })
+    assert(clip:find('!getid.*!hp 100 Ajido.*!where'), 'oldest first')
+    window.state.hist_q[1] = 'nothing like it'
+    frame()
+    assert(fake.drew('No line sent matches.'), 'says so')
+    rawset(fake.imgui, 'SetClipboardText', nil)
+    window.state.hist_q = nil
+    replies.reset()
+end)
