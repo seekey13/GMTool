@@ -841,7 +841,7 @@ test('setup: pick jobs, Apply sends the lines in order, Keep as macro keeps them
     fresh()
     window.state.page = 'setup'
     frame()
-    assert(fake.drew('!capallskills'), 'the default: cap skills, then HP and MP')
+    assert(fake.drew('!capallskills'), 'the default: cap skills')
     frame({ ['WHM (3)####gm_setup_job3'] = true })
     eq(store.cfg.setup.job, 'WHM')
     frame({ ['##gm_setup_level'] = '99' })
@@ -850,7 +850,7 @@ test('setup: pick jobs, Apply sends the lines in order, Keep as macro keeps them
     frame()
     assert(fake.drew('1.  !changejob WHM 99'), 'the first line')
     frame({ ['##gm_setup_apply'] = true })
-    eq(calls.lines[1].lines, { '!changejob WHM 99', '!capallskills', '!addallspells Seekey', '!hp 99999 Seekey', '!mp 99999 Seekey' })
+    eq(calls.lines[1].lines, { '!changejob WHM 99', '!capallskills', '!addallspells Seekey' })
     frame({ ['##gm_setup_macro'] = true })
     local m = store.cfg.macros[#store.cfg.macros]
     eq(m.name, 'Setup WHM 99')

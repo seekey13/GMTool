@@ -11,7 +11,7 @@ end
 
 test('jobs first, then skills, unlocks, gil, HP and MP', function ()
     local lines = setup.lines(o({ job = 'WHM', level = '75', master = true, sub = 'BLM', sub_level = '37', spells = true,
-                                  mounts = true, gil = '1000000' }), 'Seekey')
+                                  mounts = true, gil = '1000000', restore = true }), 'Seekey')
     eq(lines, { '!changejob WHM 75 1', '!changesjob BLM 37', '!capallskills', '!addallspells Seekey', '!addallmounts Seekey',
                 '!setgil 1000000', '!hp 99999 Seekey', '!mp 99999 Seekey' })
 end)
@@ -37,4 +37,14 @@ test('for a macro: {me} for the name; a name for it', function ()
     eq(lines[3], '!addallattachments {me}')
     eq(setup.name(o({ job = 'PUP', level = '99', sub = 'WAR', sub_level = '49' })), 'Setup PUP 99/WAR 49')
     eq(setup.name(o()), 'Setup')
+end)
+
+test('review: gil within what a character holds, sub job not the main, an empty level keeps yours', function ()
+    eq(setup.lines(o({ gil = '999999999', skills = false }), 'Seekey'), { '!setgil 999999999' })
+    eq(setup.lines(o({ gil = '1000000000', skills = false }), 'Seekey'), nil, 'over the most')
+    local l, why = setup.lines(o({ job = 'WHM', sub = 'WHM' }), 'Seekey')
+    eq(l, nil)
+    assert(why:find('main job'), why)
+    eq(setup.lines(o({ job = 'WAR', level = '', skills = false }), 'Seekey'), { '!changejob WAR' }, 'the level you have in it')
+    eq(setup.lines(o({ job = 'WAR', level = '', master = true }), 'Seekey'), nil, 'mastering needs a level before its 1')
 end)

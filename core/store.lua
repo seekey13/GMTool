@@ -25,7 +25,7 @@ store.DEFAULTS = {
     setup = {              -- the Setup page's test character (core/setup.lua)
         job = '', level = '75', master = false, sub = '', sub_level = '',
         skills = true, spells = false, ws = false, trusts = false, maps = false, mounts = false, attachments = false,
-        gil = '', restore = true,
+        gil = '', restore = false,
     },
     seq = 0,               -- the last stable id given (a macro's, a place's, a history line's `uid`)
 }

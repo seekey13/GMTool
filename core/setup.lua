@@ -11,6 +11,8 @@ local util = require('core.util')
 
 local setup = {}
 
+setup.GIL_MAX = 999999999  -- the most gil a character holds
+
 -- The switches, in the order their lines go: { key, label, help, line(me) }.
 setup.SWITCHES = {
     { 'skills', 'Cap every skill', 'Every combat and magic skill capped for the job and level set above (!capallskills)',
@@ -40,12 +42,14 @@ function setup.lines(o, me)
     o = o or {}
     local out = {}
     if util.trim(o.job) ~= '' then
-        local lv, why = level(o.level, 'Main job level')
+        -- empty: the job at the level you have in it; mastering needs a level before it (the server reads by place)
+        local lv, why = level(o.level, 'Main job level', not o.master)
         if not lv then return nil, why end
-        out[#out + 1] = ('!changejob %s %s%s'):format(o.job, lv, o.master and ' 1' or '')
+        out[#out + 1] = ('!changejob %s%s%s'):format(o.job, lv ~= '' and (' ' .. lv) or '', o.master and ' 1' or '')
     elseif o.master then
         return nil, 'pick a main job to master'
     end
+    if util.trim(o.sub) ~= '' and o.sub == o.job then return nil, 'the sub job is the main job' end
     if util.trim(o.sub) ~= '' then
         local lv, why = level(o.sub_level, 'Sub job level', true)
         if not lv then return nil, why end
@@ -56,7 +60,9 @@ function setup.lines(o, me)
     end
     local gil = util.trim(o.gil)
     if gil ~= '' then
-        if not util.is_int(gil) or tonumber(gil) < 0 then return nil, 'Gil: a whole number, 0 or more' end
+        if not util.is_int(gil) or tonumber(gil) < 0 or tonumber(gil) > setup.GIL_MAX then
+            return nil, ('Gil: a whole number, 0 to %d'):format(setup.GIL_MAX)
+        end
         out[#out + 1] = '!setgil ' .. tonumber(gil)
     end
     if o.restore then
